@@ -49,6 +49,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -169,6 +170,9 @@ private fun HubScreen(context: Context) {
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                TextButton(onClick = { context.startActivity(BrowserActivity.intent(context)) }) {
+                    Text("浏览器")
                 }
                 IconButton(onClick = { refreshKey++ }) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
@@ -436,13 +440,9 @@ private fun openAppDetails(context: Context, packageName: String) {
 }
 
 private fun openUrl(context: Context, url: String) {
-    try {
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-    } catch (_: ActivityNotFoundException) {
-        Toast.makeText(context, "没有可打开链接的应用", Toast.LENGTH_SHORT).show()
-    }
+    context.startActivity(
+        BrowserActivity.intent(context, url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
 }
 
 @Composable
