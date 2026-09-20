@@ -118,6 +118,7 @@ private val knownProjects = listOf(
     ProjectSpec("NoOverlayWarning", "com.crossbowffs.nooverlaywarning", "NoOverlayWarning", "LSPosed 屏幕悬浮警告处理模块"),
     ProjectSpec("上班总时间", "com.example.workhours", "work", "工时、工资与假期管理"),
     ProjectSpec("Legado MD3", "io.legato.kazusa", "legado-with-MD3", "阅读 / Legado MD3 项目"),
+    ProjectSpec("YBrowser", "com.yagay.YBrowser", "YBrowser", "WebView / GeckoView 双内核浏览器"),
 )
 
 @Composable
@@ -171,7 +172,7 @@ private fun HubScreen(context: Context) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                TextButton(onClick = { context.startActivity(BrowserActivity.intent(context)) }) {
+                TextButton(onClick = { openUrl(context, "https://www.google.com/") }) {
                     Text("浏览器")
                 }
                 IconButton(onClick = { refreshKey++ }) {
@@ -440,10 +441,21 @@ private fun openAppDetails(context: Context, packageName: String) {
 }
 
 private fun openUrl(context: Context, url: String) {
-    context.startActivity(
-        BrowserActivity.intent(context, url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    )
+    val intent = Intent(YBROWSER_ACTION).apply {
+        setPackage(YBROWSER_PACKAGE)
+        putExtra(YBROWSER_EXTRA_URL, url)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "请先安装 YBrowser", Toast.LENGTH_SHORT).show()
+    }
 }
+
+private const val YBROWSER_PACKAGE = "com.yagay.YBrowser"
+private const val YBROWSER_ACTION = "com.yagay.YBrowser.action.OPEN_URL"
+private const val YBROWSER_EXTRA_URL = "com.yagay.YBrowser.extra.URL"
 
 @Composable
 private fun YagaYHubTheme(content: @Composable () -> Unit) {
