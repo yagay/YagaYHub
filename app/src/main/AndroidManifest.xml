@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <queries>
-        <!-- Discover launcher apps without requesting QUERY_ALL_PACKAGES. -->
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
 
-        <!-- Known YagaY projects and legacy package IDs. -->
         <package android:name="com.yagay.floatlens" />
         <package android:name="com.yagay.ListCleaner" />
         <package android:name="com.yagay.MiniWindowGuard" />
@@ -30,6 +30,12 @@
         android:label="YagaYHub"
         android:supportsRtl="true"
         android:theme="@style/Theme.YagaYHub">
+
+        <activity
+            android:name=".BrowserActivity"
+            android:exported="false"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
+            android:label="YagaYHub 浏览器" />
 
         <activity
             android:name=".MainActivity"
