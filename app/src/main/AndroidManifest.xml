@@ -32,6 +32,7 @@
         <package android:name="com.crossbowffs.nooverlaywarning" />
         <package android:name="com.example.workhours" />
         <package android:name="io.legato.kazusa" />
+        <package android:name="com.yagay.YBrowser" />
     </queries>
 
     <application
@@ -41,13 +42,6 @@
         android:label="YagaYHub"
         android:supportsRtl="true"
         android:theme="@style/Theme.YagaYHub">
-
-        <activity
-            android:name=".BrowserActivity"
-            android:exported="false"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|uiMode"
-            android:windowSoftInputMode="adjustResize"
-            android:label="YagaYHub 浏览器" />
 
         <activity
             android:name=".MainActivity"
