@@ -82,9 +82,9 @@ class BrowserActivity : ComponentActivity() {
         toolbar.addView(toolButton("↻") { webView.reload() })
 
         addressBar.apply {
-            singleLine = true
+            isSingleLine = true
             hint = "搜索或输入网址"
-            selectAllOnFocus = true
+            setSelectAllOnFocus(true)
             setOnEditorActionListener { _, _, _ ->
                 loadInput(text.toString())
                 true
