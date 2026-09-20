@@ -31,13 +31,13 @@ Debug APK：`app/build/outputs/apk/debug/app-debug.apk`
 
 仓库内的 GitHub Actions 会在 push / pull request 时自动使用 Gradle 9.4.1 构建 Debug APK，因此当前不依赖 Gradle Wrapper。
 
+## 1.3.0 YBrowser 集成
 
-## 1.2.0 内置浏览器
-
-- YagaYHub 顶栏新增“浏览器”入口。
-- YagaYHub 内部 GitHub / 网页链接统一由自己的 BrowserActivity 打开。
-- 浏览器内点击 HTTP / HTTPS 链接继续留在自己的 WebView 中，不跳转 Chrome。
-- 支持地址输入与搜索、前进、后退、刷新、主页、分享和外部打开。
-- 支持 target=_blank / 新窗口链接回落到当前 YagaYHub 浏览器。
-- 支持网页文件下载到系统 Downloads。
-- tel:、mailto:、intent: 等非网页协议仍交给对应系统应用处理。
+- 浏览器从 YagaYHub 中完全拆分，独立维护在 `yagay/YBrowser`。
+- YagaYHub 不再包含 WebView、GeckoView 或 BrowserActivity。
+- YagaYHub 内部 GitHub / 网页链接通过 YBrowser 的公开 Intent API 打开。
+- Package: `com.yagay.YBrowser`
+- Action: `com.yagay.YBrowser.action.OPEN_URL`
+- Extra: `com.yagay.YBrowser.extra.URL`
+- 未安装 YBrowser 时会提示先安装 YBrowser。
+- YBrowser 作为独立项目负责双内核、标签页、浏览器 UI 和后续浏览器功能。
