@@ -11,8 +11,8 @@ android {
         applicationId = "com.yagay.YagaYHub"
         minSdk = 31
         targetSdk = 37
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.3.0"
     }
 
     buildFeatures {
@@ -51,6 +51,9 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
+
+    // Dual browser engine: Android System WebView + Mozilla GeckoView.
+    implementation("org.mozilla.geckoview:geckoview:155.0.20260903215306")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
