@@ -9,6 +9,17 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
 
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="http" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+
         <package android:name="com.yagay.floatlens" />
         <package android:name="com.yagay.ListCleaner" />
         <package android:name="com.yagay.MiniWindowGuard" />
@@ -34,7 +45,8 @@
         <activity
             android:name=".BrowserActivity"
             android:exported="false"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|uiMode"
+            android:windowSoftInputMode="adjustResize"
             android:label="YagaYHub 浏览器" />
 
         <activity
