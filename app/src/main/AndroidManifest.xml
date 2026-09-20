@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <queries>
+        <!-- Discover launcher apps without requesting QUERY_ALL_PACKAGES. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+
+        <!-- Known YagaY projects and legacy package IDs. -->
+        <package android:name="com.yagay.floatlens" />
+        <package android:name="com.yagay.ListCleaner" />
+        <package android:name="com.yagay.MiniWindowGuard" />
+        <package android:name="com.yagay.aihub" />
+        <package android:name="com.rk.taskmanager" />
+        <package android:name="com.yagay.dualsignal" />
+        <package android:name="com.yagay.chromex" />
+        <package android:name="com.yagay.nfcdoorcard" />
+        <package android:name="com.chenyue404.gboardhook" />
+        <package android:name="com.crossbowffs.nooverlaywarning" />
+        <package android:name="com.example.workhours" />
+        <package android:name="io.legato.kazusa" />
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="YagaYHub"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.YagaYHub">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+</manifest>
