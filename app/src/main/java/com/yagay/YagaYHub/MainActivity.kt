@@ -16,12 +16,14 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -34,22 +36,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Code
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -65,6 +64,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -123,7 +123,7 @@ private val knownProjects = listOf(
 private fun HubScreen(context: Context) {
     var apps by remember { mutableStateOf(emptyList<HubApp>()) }
     var query by remember { mutableStateOf("") }
-    var filter by remember { mutableStateOf(AppFilter.ALL) }
+    var filter by remember { mutableStateOf(AppFilter.INSTALLED) }
     var refreshKey by remember { mutableStateOf(0) }
 
     LaunchedEffect(refreshKey) {
@@ -151,42 +151,46 @@ private fun HubScreen(context: Context) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 12.dp)
         ) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("YagaYHub", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        "我的 App 直接入口",
-                        style = MaterialTheme.typography.bodyMedium,
+                        "YagaYHub",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "单击打开 · 长按详情",
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                TextButton(onClick = { refreshKey++ }) {
-                    Icon(Icons.Outlined.Refresh, contentDescription = null)
-                    Spacer(Modifier.size(4.dp))
-                    Text("刷新")
+                IconButton(onClick = { refreshKey++ }) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(6.dp))
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                placeholder = { Text("搜索 App") },
-                shape = RoundedCornerShape(18.dp),
+                placeholder = { Text("搜索我的 App") },
+                shape = RoundedCornerShape(16.dp),
             )
 
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 AppFilter.entries.forEach { item ->
                     val count = when (item) {
                         AppFilter.ALL -> apps.size
@@ -201,26 +205,39 @@ private fun HubScreen(context: Context) {
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             if (visibleApps.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("没有匹配的 App", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(132.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    items(visibleApps, key = { it.packageName }) { app ->
-                        AppTile(
-                            app = app,
-                            onOpen = { openApp(context, app) },
-                            onRepo = { app.repo?.let { openUrl(context, "https://github.com/yagay/$it") } },
-                            onDetails = { openAppDetails(context, app.packageName) },
-                        )
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val columns = if (maxWidth < 430.dp) 4 else 5
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(columns),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        items(visibleApps, key = { it.packageName }) { app ->
+                            AppEntry(
+                                app = app,
+                                onClick = {
+                                    when {
+                                        app.launchIntent != null -> openApp(context, app)
+                                        app.repo != null -> openUrl(context, "https://github.com/yagay/${app.repo}")
+                                        app.installed -> openAppDetails(context, app.packageName)
+                                    }
+                                },
+                                onLongClick = {
+                                    when {
+                                        app.installed -> openAppDetails(context, app.packageName)
+                                        app.repo != null -> openUrl(context, "https://github.com/yagay/${app.repo}")
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -228,79 +245,64 @@ private fun HubScreen(context: Context) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AppTile(
+private fun AppEntry(
     app: HubApp,
-    onOpen: () -> Unit,
-    onRepo: () -> Unit,
-    onDetails: () -> Unit,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
 ) {
-    val canOpen = app.installed && app.launchIntent != null
-    Card(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = canOpen, onClick = onOpen),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
+            .padding(horizontal = 2.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
+        Box {
             AppIcon(app)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                app.name,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(13.dp)
+                    .clip(CircleShape)
+                    .background(
+                        when {
+                            !app.installed -> MaterialTheme.colorScheme.outline
+                            app.launchIntent == null -> MaterialTheme.colorScheme.tertiary
+                            else -> MaterialTheme.colorScheme.primary
+                        }
+                    )
             )
-            Text(
-                when {
-                    !app.installed -> "未安装"
-                    app.launchIntent == null -> "无直接入口"
-                    app.versionName.isNullOrBlank() -> "已安装"
-                    else -> app.versionName
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = if (app.installed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                app.description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (app.autoDiscovered) {
-                Text("自动发现", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
-            }
-            Spacer(Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                if (app.repo != null) {
-                    TextButton(onClick = onRepo, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                        Icon(Icons.Outlined.Code, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.size(2.dp))
-                        Text("GitHub")
-                    }
-                } else {
-                    Spacer(Modifier.size(1.dp))
-                }
-                if (app.installed) {
-                    TextButton(onClick = onDetails, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                        Icon(Icons.Outlined.Info, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.size(2.dp))
-                        Text("详情")
-                    }
-                }
-            }
         }
+
+        Spacer(Modifier.height(6.dp))
+        Text(
+            app.name,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            when {
+                !app.installed -> "未安装"
+                app.launchIntent == null -> "模块"
+                app.versionName.isNullOrBlank() -> "已安装"
+                else -> app.versionName
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -311,13 +313,15 @@ private fun AppIcon(app: HubApp) {
         Image(
             painter = BitmapPainter(bitmap),
             contentDescription = app.name,
-            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(14.dp)),
+            modifier = Modifier
+                .size(58.dp)
+                .clip(RoundedCornerShape(15.dp)),
         )
     } else {
         Box(
             modifier = Modifier
-                .size(56.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .size(58.dp)
+                .clip(RoundedCornerShape(15.dp))
                 .background(MaterialTheme.colorScheme.secondaryContainer),
             contentAlignment = Alignment.Center,
         ) {
@@ -346,7 +350,11 @@ private fun loadHubApps(context: Context): List<HubApp> {
     resolved.asSequence()
         .mapNotNull { it.activityInfo?.packageName }
         .distinct()
-        .filter { it != context.packageName && it !in existing && it.startsWith("com.yagay.", ignoreCase = true) }
+        .filter {
+            it != context.packageName &&
+                it !in existing &&
+                it.startsWith("com.yagay.", ignoreCase = true)
+        }
         .forEach { pkg ->
             val info = getPackageInfoCompat(pm, pkg)
             val applicationInfo = info?.applicationInfo
@@ -366,7 +374,11 @@ private fun loadHubApps(context: Context): List<HubApp> {
             )
         }
 
-    return apps.sortedWith(compareByDescending<HubApp> { it.installed }.thenBy { it.name.lowercase() })
+    return apps.sortedWith(
+        compareByDescending<HubApp> { it.installed }
+            .thenByDescending { it.launchIntent != null }
+            .thenBy { it.name.lowercase() }
+    )
 }
 
 private fun loadKnownApp(pm: PackageManager, spec: ProjectSpec): HubApp {
