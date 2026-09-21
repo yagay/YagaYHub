@@ -4110,10 +4110,9 @@ private fun startChatGptBinding(
             app.repoOwner + "/" + repo,
         )
         putExtra(EXTRA_CHAT_BIND_PROJECT, app.name)
-        putExtra(
-            YBROWSER_EXTRA_URL,
-            currentBinding?.url ?: "https://chatgpt.com/",
-        )
+        currentBinding?.url
+            ?.takeIf { it.isNotBlank() }
+            ?.let { putExtra(YBROWSER_EXTRA_URL, it) }
     }
     try {
         context.startActivity(intent)
