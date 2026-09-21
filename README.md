@@ -2,8 +2,14 @@
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
 
-## 1.5.0
+## 1.6.0
 
+- 显示最近一次 Actions 的本地时间（MM-dd HH:mm）。
+- 自动从 GitHub 拉取并合并账号项目，不再依赖硬编码项目列表；没有 APK / Android App 的仓库也会作为 GitHub 项目显示。
+- 新增“GitHub”筛选；纯仓库项目不会再被算作“未安装 App”。
+- 自动将名称/包名尾段与仓库名匹配的已安装 YagaY App 合并，避免 App 与仓库重复显示。
+- 设置页支持 GitHub App Device Flow 账号授权：填写 GitHub App Client ID 后，复制验证码并打开 GitHub 完成授权；不需要 client secret。
+- 保留 Fine-grained Token 作为备用方式；授权 token 与手动 token 都继续使用 Android Keystore 加密保存。
 - 每个已登记 GitHub 仓库的 App 条目新增带运行图标的 `Actions` 一键入口。
 - 直接显示最近一次 Actions 状态：成功、失败、运行中、排队中、已取消、无记录或未知。
 - 只扫描每个仓库最新一次 Actions，不再向前查找更早的成功构建。
@@ -27,6 +33,18 @@ YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看�
 - 自动发现额外的 `com.yagay.*` Launcher App。
 - 已登记 FloatLens、List Cleaner、MiniWindowGuard、AIHub、TaskManagerX、Dual Signal、ChromeX、NFCExpertPro、GboardHook、NoOverlayWarning、上班总时间和 Legado MD3。
 - 不申请 `QUERY_ALL_PACKAGES`。
+
+### GitHub App 账号授权（推荐）
+
+1. 在 GitHub Settings → Developer settings → GitHub Apps 新建一个 GitHub App。
+2. Repository permissions 至少设置：Metadata = Read-only，Actions = Read-only。
+3. 启用 Device Flow。
+4. 将 GitHub App 安装到需要管理的仓库；要显示全部私有仓库时选择 All repositories。
+5. 复制 GitHub App 的 Client ID。
+6. YagaYHub → 设置 → GitHub App Client ID → “使用 GitHub 账号授权”。
+7. YagaYHub 会显示一次性授权码；点击“复制并打开 GitHub”，在 GitHub 完成授权即可。
+
+Device Flow 不需要在 APK 中保存 client secret。公开仓库即使未授权也会自动载入；账号授权后还会合并 GitHub App 有权访问的私有仓库。
 
 ### GitHub Token 使用
 
