@@ -652,6 +652,20 @@ private fun HubScreen(
                 }
             } else {
                 val itemContent: @Composable (HubApp) -> Unit = { app ->
+                    val chatBinding = remember(
+                        chatBindingRevision,
+                        app.repoOwner,
+                        app.repo,
+                    ) {
+                        app.repo?.let { repo ->
+                            loadChatBinding(
+                                context = context,
+                                owner = app.repoOwner,
+                                repo = repo,
+                            )
+                        }
+                    }
+
                     val onClick: () -> Unit = {
                         when {
                             app.launchIntent != null -> openApp(context, app)
@@ -737,6 +751,30 @@ private fun HubScreen(
                             }
                         }
                     }
+                    val onChatClick: () -> Unit = {
+                        val repo = app.repo
+                        when {
+                            repo == null -> Unit
+                            chatBinding != null -> openUrl(
+                                context,
+                                chatBinding.url,
+                            )
+                            else -> startChatGptBinding(
+                                context = context,
+                                app = app,
+                                currentBinding = null,
+                            )
+                        }
+                    }
+                    val onChatLongClick: () -> Unit = {
+                        if (app.repo != null) {
+                            startChatGptBinding(
+                                context = context,
+                                app = app,
+                                currentBinding = chatBinding,
+                            )
+                        }
+                    }
 
                     if (layoutMode == LayoutMode.LIST) {
                         AppListEntry(
@@ -745,6 +783,9 @@ private fun HubScreen(
                             onLongClick = onLongClick,
                             onActionsClick = onActionsClick,
                             onArtifactClick = onArtifactClick,
+                            chatBinding = chatBinding,
+                            onChatClick = onChatClick,
+                            onChatLongClick = onChatLongClick,
                         )
                     } else {
                         AppEntry(
@@ -753,6 +794,9 @@ private fun HubScreen(
                             onLongClick = onLongClick,
                             onActionsClick = onActionsClick,
                             onArtifactClick = onArtifactClick,
+                            chatBinding = chatBinding,
+                            onChatClick = onChatClick,
+                            onChatLongClick = onChatLongClick,
                         )
                     }
                 }
@@ -1572,6 +1616,9 @@ private fun AppListEntry(
     onLongClick: () -> Unit,
     onActionsClick: () -> Unit,
     onArtifactClick: () -> Unit,
+    chatBinding: ChatBinding?,
+    onChatClick: () -> Unit,
+    onChatLongClick: () -> Unit,
 ) {
     val hasNewerActions = hasNewerActionsBuild(app)
 
@@ -1749,6 +1796,33 @@ private fun AppListEntry(
                             maxLines = 1,
                         )
                     }
+
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .combinedClickable(
+                                onClick = onChatClick,
+                                onLongClick = onChatLongClick,
+                            )
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (chatBinding != null) "ChatGPT" else "绑定 GPT",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (chatBinding != null) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.secondary
+                            },
+                            fontWeight = if (chatBinding != null) {
+                                FontWeight.SemiBold
+                            } else {
+                                FontWeight.Normal
+                            },
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
@@ -1763,6 +1837,9 @@ private fun AppEntry(
     onLongClick: () -> Unit,
     onActionsClick: () -> Unit,
     onArtifactClick: () -> Unit,
+    chatBinding: ChatBinding?,
+    onChatClick: () -> Unit,
+    onChatLongClick: () -> Unit,
 ) {
     val hasNewerActions = hasNewerActionsBuild(app)
 
@@ -1936,6 +2013,28 @@ private fun AppEntry(
                     maxLines = 1,
                 )
             }
+            Text(
+                if (chatBinding != null) "ChatGPT" else "绑定 GPT",
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .combinedClickable(
+                        onClick = onChatClick,
+                        onLongClick = onChatLongClick,
+                    )
+                    .padding(horizontal = 5.dp, vertical = 3.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (chatBinding != null) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.secondary
+                },
+                fontWeight = if (chatBinding != null) {
+                    FontWeight.SemiBold
+                } else {
+                    FontWeight.Normal
+                },
+                maxLines = 1,
+            )
         }
     }
 }
