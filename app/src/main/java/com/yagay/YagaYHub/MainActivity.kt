@@ -848,10 +848,10 @@ private fun downloadArtifactZip(
 
         val fileName = repo + "-" + runId + ".zip"
         val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-            put(MediaStore.Downloads.MIME_TYPE, "application/zip")
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/YagaYHub")
-            put(MediaStore.Downloads.IS_PENDING, 1)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/YagaYHub")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
 
         outputUri = context.contentResolver.insert(
