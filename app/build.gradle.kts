@@ -11,12 +11,37 @@ android {
         applicationId = "com.yagay.YagaYHub"
         minSdk = 31
         targetSdk = 37
-        versionCode = 18
-        versionName = "1.6.7"
+        versionCode = 19
+        versionName = "1.6.8"
+
+        val githubClientId = providers
+            .environmentVariable("YAGAY_GITHUB_CLIENT_ID")
+            .orNull
+            .orEmpty()
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+        val githubClientSecret = providers
+            .environmentVariable("YAGAY_GITHUB_CLIENT_SECRET")
+            .orNull
+            .orEmpty()
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+
+        buildConfigField(
+            "String",
+            "GITHUB_OAUTH_CLIENT_ID",
+            "\"$githubClientId\""
+        )
+        buildConfigField(
+            "String",
+            "GITHUB_OAUTH_CLIENT_SECRET",
+            "\"$githubClientSecret\""
+        )
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
