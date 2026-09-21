@@ -26,6 +26,9 @@ jobs:
           gradle-version: '9.4.1'
 
       - name: Build debug APK
+        env:
+          YAGAY_GITHUB_CLIENT_ID: ${{ secrets.YAGAY_GITHUB_CLIENT_ID }}
+          YAGAY_GITHUB_CLIENT_SECRET: ${{ secrets.YAGAY_GITHUB_CLIENT_SECRET }}
         run: gradle --no-daemon assembleDebug
 
       - name: Upload debug APK
