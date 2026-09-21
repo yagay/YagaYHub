@@ -1237,14 +1237,12 @@ private fun DownloadPanel(
                     )
                     state.apks.forEach { apk ->
                         Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onInstall(apk) },
+                            modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp),
                             tonalElevation = 1.dp,
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Column(Modifier.weight(1f)) {
@@ -1262,11 +1260,9 @@ private fun DownloadPanel(
                                         )
                                     }
                                 }
-                                Text(
-                                    "Install",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
+                                TextButton(onClick = { onInstall(apk) }) {
+                                    Text("Install")
+                                }
                             }
                         }
                     }
