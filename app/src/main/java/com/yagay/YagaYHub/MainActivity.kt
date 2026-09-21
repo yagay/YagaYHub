@@ -366,8 +366,20 @@ private fun HubScreen(context: Context) {
     var refreshKey by remember { mutableStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
     var githubToken by remember { mutableStateOf(loadGithubToken(context)) }
-    var githubClientId by remember { mutableStateOf(loadGithubClientId(context)) }
-    var githubClientSecret by remember { mutableStateOf(loadGithubClientSecret(context)) }
+    var githubClientId by remember {
+        mutableStateOf(
+            loadGithubClientId(context).ifBlank {
+                BuildConfig.GITHUB_OAUTH_CLIENT_ID
+            }
+        )
+    }
+    var githubClientSecret by remember {
+        mutableStateOf(
+            loadGithubClientSecret(context).ifBlank {
+                BuildConfig.GITHUB_OAUTH_CLIENT_SECRET
+            }
+        )
+    }
     var webAuthInProgress by remember { mutableStateOf(false) }
     var deviceAuth by remember { mutableStateOf<DeviceAuthInfo?>(null) }
     var authPolling by remember { mutableStateOf(false) }
@@ -965,13 +977,8 @@ private fun GitHubSettingsDialog(
     var clientSecret by remember(currentClientSecret) {
         mutableStateOf(currentClientSecret)
     }
-    var showGithubAdvanced by remember(
-        currentClientId,
-        currentClientSecret,
-    ) {
-        mutableStateOf(
-            currentClientId.isBlank() || currentClientSecret.isBlank()
-        )
+    var showGithubAdvanced by remember {
+        mutableStateOf(false)
     }
 
     val githubAppConfigured =
@@ -1029,11 +1036,11 @@ private fun GitHubSettingsDialog(
                     ) {
                         Text(
                             if (currentToken.isNotBlank()) {
-                                "GitHub 账号：已授权"
+                                "GitHub 账号：已登录"
                             } else if (githubAppConfigured) {
-                                "GitHub 账号：已配置，未授权"
+                                "GitHub 账号：未登录"
                             } else {
-                                "GitHub 账号：首次配置"
+                                "GitHub 登录配置未内置"
                             },
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
@@ -1053,7 +1060,11 @@ private fun GitHubSettingsDialog(
                                 if (webAuthInProgress) {
                                     "正在登录 GitHub…"
                                 } else {
-                                    "一键登录 GitHub"
+                                    if (currentToken.isNotBlank()) {
+                                        "切换 GitHub 账号"
+                                    } else {
+                                        "登录 GitHub"
+                                    }
                                 }
                             )
                         }
@@ -2889,7 +2900,8 @@ private fun buildGithubAuthorizeUrl(
         "&redirect_uri=" + enc(session.redirectUri) +
         "&state=" + enc(session.state) +
         "&code_challenge=" + enc(session.codeChallenge) +
-        "&code_challenge_method=S256"
+        "&code_challenge_method=S256" +
+        "&prompt=select_account"
 }
 
 private fun completeGithubWebAuth(
