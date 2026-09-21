@@ -765,6 +765,7 @@ private fun HubScreen(
                             chatBinding != null -> openUrl(
                                 context,
                                 chatBinding.url,
+                                reuseExisting = true,
                             )
                             else -> startChatGptBinding(
                                 context = context,
@@ -3610,10 +3611,17 @@ private fun startChatGptBinding(
     }
 }
 
-private fun openUrl(context: Context, url: String) {
+private fun openUrl(
+    context: Context,
+    url: String,
+    reuseExisting: Boolean = false,
+) {
     val intent = Intent(YBROWSER_ACTION).apply {
         setPackage(YBROWSER_PACKAGE)
         putExtra(YBROWSER_EXTRA_URL, url)
+        if (reuseExisting) {
+            putExtra(YBROWSER_EXTRA_REUSE_EXISTING, true)
+        }
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     try {
@@ -3626,6 +3634,8 @@ private fun openUrl(context: Context, url: String) {
 private const val YBROWSER_PACKAGE = "com.yagay.YBrowser"
 private const val YBROWSER_ACTION = "com.yagay.YBrowser.action.OPEN_URL"
 private const val YBROWSER_EXTRA_URL = "com.yagay.YBrowser.extra.URL"
+private const val YBROWSER_EXTRA_REUSE_EXISTING =
+    "com.yagay.YBrowser.extra.REUSE_EXISTING"
 
 @Composable
 private fun YagaYHubTheme(content: @Composable () -> Unit) {
