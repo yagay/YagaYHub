@@ -2,8 +2,15 @@
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
 
-## 1.6.5
+## 1.6.6
 
+- Actions artifact 下载改为 `ForegroundService` 后台任务，离开 YagaYHub 后仍可继续下载。
+- 通知栏实时显示下载阶段、进度百分比、已下载/总大小；下载完成后保留完成通知，点击可回到 YagaYHub。
+- Android 13+ 首次下载会请求通知权限；未授权时下载仍继续，但通知栏进度可能不可见。
+- 下载状态与最终 APK 列表会持久化，返回 App 后仍可查看最后一次下载结果。
+- 下载面板运行中可点“后台运行”关闭，下载不会停止。
+- 取消所有 APK 自动打开行为；ZIP 解压完成后只显示 APK 列表，只有明确点击右侧 `Install` 按钮才调用系统安装器。
+- 新增 `FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_DATA_SYNC`、`POST_NOTIFICATIONS` 权限及 dataSync 前台服务声明。
 - 默认改为紧凑列表布局：左侧 App 图标，中间显示名称、版本、本机更新时间和 Actions 时间，右侧显示 Actions 状态、ZIP 大小和下载入口。
 - 顶部新增列表/网格切换，布局选择会本地保存；需要时可切回原 4/5 列网格。
 - 本机更新时间和 Actions 时间改为完整格式 `yyyy-MM-dd HH:mm`，列表模式允许时间信息完整显示，不再被窄列截断。
