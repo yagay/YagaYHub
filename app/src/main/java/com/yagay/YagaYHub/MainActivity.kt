@@ -107,6 +107,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -133,15 +134,50 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    private var chatBindingRevision by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleChatBindingIntent(intent)
         setContent {
             YagaYHubTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    HubScreen(this)
+                    HubScreen(
+                        context = this,
+                        chatBindingRevision = chatBindingRevision,
+                    )
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleChatBindingIntent(intent)
+    }
+
+    private fun handleChatBindingIntent(intent: Intent?) {
+        if (intent?.action != ACTION_CHATGPT_BOUND) return
+        val repo = intent.getStringExtra(EXTRA_CHAT_BIND_REPO).orEmpty()
+        val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
+        val title = intent.getStringExtra(EXTRA_CHAT_BIND_TITLE)
+            .orEmpty()
+            .ifBlank { "ChatGPT" }
+        if (repo.isBlank() || url.isBlank()) return
+
+        saveChatBinding(
+            context = this,
+            repoKey = repo,
+            title = title,
+            url = url,
+        )
+        chatBindingRevision++
+        Toast.makeText(
+            this,
+            "已绑定 ChatGPT · " + repo.substringAfter('/'),
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 }
 
@@ -332,6 +368,12 @@ private enum class LayoutMode(val label: String) {
     GRID("网格"),
 }
 
+private data class ChatBinding(
+    val repoKey: String,
+    val title: String,
+    val url: String,
+)
+
 private data class DownloadUiState(
     val appName: String,
     val stage: String = "准备下载",
@@ -361,7 +403,10 @@ private val knownProjects = listOf(
 )
 
 @Composable
-private fun HubScreen(context: Context) {
+private fun HubScreen(
+    context: Context,
+    chatBindingRevision: Int,
+) {
     var apps by remember { mutableStateOf(emptyList<HubApp>()) }
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(AppFilter.INSTALLED) }
@@ -3295,6 +3340,16 @@ private fun loadLayoutMode(context: Context): LayoutMode {
         .getOrDefault(LayoutMode.LIST)
 }
 
+private const val ACTION_CHATGPT_BOUND =
+    "com.yagay.YagaYHub.action.CHATGPT_BOUND"
+private const val YBROWSER_SELECT_CHAT_ACTION =
+    "com.yagay.YBrowser.action.SELECT_CHATGPT_CHAT"
+private const val EXTRA_CHAT_BIND_REPO = "com.yagay.YBrowser.extra.BIND_REPO"
+private const val EXTRA_CHAT_BIND_PROJECT = "com.yagay.YBrowser.extra.BIND_PROJECT"
+private const val EXTRA_CHAT_BIND_URL = "com.yagay.YBrowser.extra.BIND_URL"
+private const val EXTRA_CHAT_BIND_TITLE = "com.yagay.YBrowser.extra.BIND_TITLE"
+private const val CHAT_BINDINGS_PREFS = "chatgpt_bindings"
+
 private const val DOWNLOAD_CHANNEL_ID = "artifact_downloads"
 private const val DOWNLOAD_NOTIFICATION_ID = 4107
 private const val ACTION_DOWNLOAD_STATE = "com.yagay.YagaYHub.action.DOWNLOAD_STATE"
@@ -3362,6 +3417,77 @@ private fun openAppDetails(context: Context, packageName: String) {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     runCatching { context.startActivity(intent) }
+}
+
+private fun normalizedRepoKey(repoKey: String): String =
+    repoKey.trim().lowercase()
+
+private fun saveChatBinding(
+    context: Context,
+    repoKey: String,
+    title: String,
+    url: String,
+) {
+    val key = normalizedRepoKey(repoKey)
+    if (key.isBlank()) return
+    context.getSharedPreferences(CHAT_BINDINGS_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(key + ":url", url)
+        .putString(key + ":title", title.ifBlank { "ChatGPT" })
+        .apply()
+}
+
+private fun loadChatBinding(
+    context: Context,
+    owner: String,
+    repo: String,
+): ChatBinding? {
+    val repoKey = normalizedRepoKey(owner + "/" + repo)
+    val prefs = context.getSharedPreferences(
+        CHAT_BINDINGS_PREFS,
+        Context.MODE_PRIVATE,
+    )
+    val url = prefs.getString(repoKey + ":url", null)
+        ?.takeIf { it.isNotBlank() }
+        ?: return null
+    val title = prefs.getString(repoKey + ":title", null)
+        ?.takeIf { it.isNotBlank() }
+        ?: "ChatGPT"
+    return ChatBinding(
+        repoKey = repoKey,
+        title = title,
+        url = url,
+    )
+}
+
+private fun startChatGptBinding(
+    context: Context,
+    app: HubApp,
+    currentBinding: ChatBinding?,
+) {
+    val repo = app.repo ?: return
+    val intent = Intent(YBROWSER_SELECT_CHAT_ACTION).apply {
+        setPackage(YBROWSER_PACKAGE)
+        putExtra(
+            EXTRA_CHAT_BIND_REPO,
+            app.repoOwner + "/" + repo,
+        )
+        putExtra(EXTRA_CHAT_BIND_PROJECT, app.name)
+        putExtra(
+            YBROWSER_EXTRA_URL,
+            currentBinding?.url ?: "https://chatgpt.com/",
+        )
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(
+            context,
+            "请先安装或更新 YBrowser",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
 }
 
 private fun openUrl(context: Context, url: String) {
