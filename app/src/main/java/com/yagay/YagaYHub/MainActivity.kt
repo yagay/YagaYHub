@@ -2843,6 +2843,26 @@ private fun loadLayoutMode(context: Context): LayoutMode {
         .getOrDefault(LayoutMode.LIST)
 }
 
+private const val DOWNLOAD_CHANNEL_ID = "artifact_downloads"
+private const val DOWNLOAD_NOTIFICATION_ID = 4107
+private const val ACTION_DOWNLOAD_STATE = "com.yagay.YagaYHub.action.DOWNLOAD_STATE"
+
+private const val EXTRA_DOWNLOAD_APP_NAME = "download_app_name"
+private const val EXTRA_DOWNLOAD_OWNER = "download_owner"
+private const val EXTRA_DOWNLOAD_REPO = "download_repo"
+private const val EXTRA_DOWNLOAD_RUN_ID = "download_run_id"
+private const val EXTRA_DOWNLOAD_ARTIFACT_ID = "download_artifact_id"
+private const val EXTRA_DOWNLOAD_EXPECTED_SIZE = "download_expected_size"
+
+private const val EXTRA_STATE_APP_NAME = "state_app_name"
+private const val EXTRA_STATE_STAGE = "state_stage"
+private const val EXTRA_STATE_DOWNLOADED = "state_downloaded"
+private const val EXTRA_STATE_TOTAL = "state_total"
+private const val EXTRA_STATE_RUNNING = "state_running"
+private const val EXTRA_STATE_MESSAGE = "state_message"
+private const val EXTRA_STATE_APK_NAMES = "state_apk_names"
+private const val EXTRA_STATE_APK_URIS = "state_apk_uris"
+
 private const val TOKEN_PREFS = "github_secure"
 private const val TOKEN_IV = "token_iv"
 private const val TOKEN_DATA = "token_data"
