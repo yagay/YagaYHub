@@ -845,8 +845,7 @@ private fun HubScreen(
                 IconButton(
                     onClick = {
                         val bindings = loadAllChatBindings(context)
-                        val target = bindings.firstOrNull()
-                        if (target == null) {
+                        if (bindings.isEmpty()) {
                             Toast.makeText(
                                 context,
                                 "还没有绑定 AI 页面，请先在项目中点击“绑定”",
@@ -855,10 +854,7 @@ private fun HubScreen(
                         } else {
                             openChatPopup(
                                 context = context,
-                                url = target.url,
-                                bindingRepoKey = target.repoKey,
-                                bindingProject = projectNameForBinding(target),
-                                bindingTitle = target.title,
+                                url = null,
                             )
                         }
                     },
@@ -4692,7 +4688,7 @@ private fun syncChatBindingToYBrowser(
 
 private fun openChatPopup(
     context: Context,
-    url: String,
+    url: String?,
     bindingRepoKey: String? = null,
     bindingProject: String? = null,
     bindingTitle: String? = null,
@@ -4701,7 +4697,9 @@ private fun openChatPopup(
         setPackage(YBROWSER_PACKAGE)
         putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
         putExtra(YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE, true)
-        putExtra(YBROWSER_EXTRA_URL, url)
+        url?.takeIf { it.isNotBlank() }?.let {
+            putExtra(YBROWSER_EXTRA_URL, it)
+        }
         putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
         if (!bindingRepoKey.isNullOrBlank()) {
             putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
