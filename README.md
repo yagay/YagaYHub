@@ -2,8 +2,11 @@
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
 
-## 1.6.4
+## 1.6.5
 
+- 默认改为紧凑列表布局：左侧 App 图标，中间显示名称、版本、本机更新时间和 Actions 时间，右侧显示 Actions 状态、ZIP 大小和下载入口。
+- 顶部新增列表/网格切换，布局选择会本地保存；需要时可切回原 4/5 列网格。
+- 本机更新时间和 Actions 时间改为完整格式 `yyyy-MM-dd HH:mm`，列表模式允许时间信息完整显示，不再被窄列截断。
 - 下载成功后自动解压 artifact ZIP 内的 APK，并把 APK 保存到当前下载目录；同名 APK 会覆盖旧文件。
 - ZIP 内多个 APK 会全部解压，并优先选择 `release` / `universal` / `base.apk` / `app-*` 作为主 APK，自动调用系统安装器打开。
 - APK 文件名会过滤路径和非法字符，避免 ZIP 目录结构写出到目标目录。
