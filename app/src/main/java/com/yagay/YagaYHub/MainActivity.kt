@@ -1610,12 +1610,17 @@ private fun AppListEntry(
                     Text(
                         "Actions   " + actionTime,
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (hasNewerActions) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                        color = when {
+                            !app.installed && !app.repoOnly ->
+                                MaterialTheme.colorScheme.error
+                            hasNewerActions ->
+                                MaterialTheme.colorScheme.primary
+                            else ->
+                                MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        fontWeight = if (hasNewerActions) {
+                        fontWeight = if (
+                            (!app.installed && !app.repoOnly) || hasNewerActions
+                        ) {
                             FontWeight.SemiBold
                         } else {
                             FontWeight.Normal
@@ -1649,37 +1654,25 @@ private fun AppListEntry(
                                 .size(7.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    when {
-                                        !app.installed && !app.repoOnly ->
-                                            MaterialTheme.colorScheme.error
-                                        app.actionsStatus == ActionsStatus.SUCCESS -> MaterialTheme.colorScheme.primary
-                                        app.actionsStatus == ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
-                                        app.actionsStatus == ActionsStatus.RUNNING -> MaterialTheme.colorScheme.tertiary
-                                        app.actionsStatus == ActionsStatus.QUEUED -> MaterialTheme.colorScheme.secondary
-                                        app.actionsStatus == ActionsStatus.CANCELLED -> MaterialTheme.colorScheme.outline
-                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    when (app.actionsStatus) {
+                                        ActionsStatus.SUCCESS -> MaterialTheme.colorScheme.primary
+                                        ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
+                                        ActionsStatus.RUNNING -> MaterialTheme.colorScheme.tertiary
+                                        ActionsStatus.QUEUED -> MaterialTheme.colorScheme.secondary
+                                        ActionsStatus.CANCELLED -> MaterialTheme.colorScheme.outline
+                                        ActionsStatus.LOADING,
+                                        ActionsStatus.NONE,
+                                        ActionsStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
                                     }
                                 )
                         )
                         Text(
-                            if (!app.installed && !app.repoOnly) {
-                                "未安装"
-                            } else {
-                                app.actionsStatus.label
-                            },
+                            app.actionsStatus.label,
                             style = MaterialTheme.typography.labelMedium,
-                            color = when {
-                                !app.installed && !app.repoOnly ->
-                                    MaterialTheme.colorScheme.error
-                                app.actionsStatus == ActionsStatus.FAILURE ->
-                                    MaterialTheme.colorScheme.error
-                                else ->
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            fontWeight = if (!app.installed && !app.repoOnly) {
-                                FontWeight.SemiBold
+                            color = if (app.actionsStatus == ActionsStatus.FAILURE) {
+                                MaterialTheme.colorScheme.error
                             } else {
-                                FontWeight.Normal
+                                MaterialTheme.colorScheme.onSurfaceVariant
                             },
                             maxLines = 1,
                         )
@@ -1838,24 +1831,11 @@ private fun AppEntry(
                             ),
                     )
                     Text(
-                        if (!app.installed && !app.repoOnly) {
-                            "未安装"
-                        } else {
-                            app.actionsStatus.label
-                        },
+                        app.actionsStatus.label,
                         style = MaterialTheme.typography.labelSmall,
-                        color = when {
-                            !app.installed && !app.repoOnly ->
-                                MaterialTheme.colorScheme.error
-                            app.actionsStatus == ActionsStatus.FAILURE ->
-                                MaterialTheme.colorScheme.error
-                            else ->
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        fontWeight = if (!app.installed && !app.repoOnly) {
-                            FontWeight.SemiBold
-                        } else {
-                            FontWeight.Normal
+                        color = when (app.actionsStatus) {
+                            ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                         maxLines = 1,
                     )
@@ -1892,12 +1872,17 @@ private fun AppEntry(
                 Text(
                     "Actions " + actionTime,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (hasNewerActions) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                    color = when {
+                        !app.installed && !app.repoOnly ->
+                            MaterialTheme.colorScheme.error
+                        hasNewerActions ->
+                            MaterialTheme.colorScheme.primary
+                        else ->
+                            MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    fontWeight = if (hasNewerActions) {
+                    fontWeight = if (
+                        (!app.installed && !app.repoOnly) || hasNewerActions
+                    ) {
                         FontWeight.SemiBold
                     } else {
                         FontWeight.Normal
