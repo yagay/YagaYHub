@@ -645,7 +645,7 @@ private fun AppEntry(
         )
         app.installedUpdateTime?.let { updateTime ->
             Text(
-                "本机 " + updateTime,
+                "本机更新 " + updateTime,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -731,7 +731,7 @@ private fun AppEntry(
             }
             app.latestActionTime?.let { actionTime ->
                 Text(
-                    actionTime,
+                    "Actions " + actionTime,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
