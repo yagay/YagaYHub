@@ -2,8 +2,10 @@
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
 
-## 1.6.8
+## 1.6.9
 
+- 当已安装 App 的本机更新时间早于最新 Actions 时间时，Actions 时间使用主题强调色并加粗显示，方便快速识别 GitHub 上已有更新构建。
+- 列表和网格两种布局使用相同判断；未安装、纯 GitHub 项目或时间缺失时不高亮。
 - GitHub 登录改为首次安装也无需填写 Client ID / Client Secret：正式构建从 GitHub Actions Secrets 注入 OAuth 配置，App 内默认只显示 `登录 GitHub`。
 - 登录按钮直接打开 GitHub 官方账号选择/登录页，可使用账号密码、2FA 或 Passkey；YagaYHub 不读取或保存 GitHub 密码。
 - OAuth 仍使用 Authorization Code + PKCE；高级设置仅作为未注入构建配置时的备用入口。
