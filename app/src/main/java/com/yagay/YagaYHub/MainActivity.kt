@@ -25,6 +25,7 @@ import android.util.Base64
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -78,6 +79,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -139,6 +141,13 @@ private enum class ActionsStatus(val label: String) {
     UNKNOWN("未知"),
 }
 
+private enum class RootStatus(val label: String) {
+    NOT_CHECKED("未检测"),
+    AVAILABLE("已授权"),
+    UNAVAILABLE("不可用"),
+}
+
+
 private data class HubApp(
     val name: String,
     val packageName: String,
@@ -192,6 +201,8 @@ private fun HubScreen(context: Context) {
     var authPolling by remember { mutableStateOf(false) }
     var authStatus by remember { mutableStateOf("") }
     var downloadTreeUri by remember { mutableStateOf(loadDownloadDirectoryUri(context)) }
+    var rootCleanupEnabled by remember { mutableStateOf(loadRootCleanupEnabled(context)) }
+    var rootStatus by remember { mutableStateOf(RootStatus.NOT_CHECKED) }
     val scope = rememberCoroutineScope()
     val directoryPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -207,6 +218,16 @@ private fun HubScreen(context: Context) {
             saveDownloadDirectoryUri(context, uri.toString())
             downloadTreeUri = uri.toString()
             Toast.makeText(context, "下载目录已更新", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(rootCleanupEnabled) {
+        if (rootCleanupEnabled) {
+            rootStatus = withContext(Dispatchers.IO) {
+                if (hasRootAccess()) RootStatus.AVAILABLE else RootStatus.UNAVAILABLE
+            }
+        } else {
+            rootStatus = RootStatus.NOT_CHECKED
         }
     }
 
@@ -388,6 +409,8 @@ private fun HubScreen(context: Context) {
                                                         artifactId = artifactId,
                                                         token = githubToken,
                                                         destinationTreeUri = downloadTreeUri,
+                                                        rootEnhancedCleanup = rootCleanupEnabled &&
+                                                            rootStatus == RootStatus.AVAILABLE,
                                                     )
                                                 }
                                                 Toast.makeText(
@@ -412,6 +435,8 @@ private fun HubScreen(context: Context) {
             currentToken = githubToken,
             currentClientId = githubClientId,
             downloadDirectoryLabel = downloadDirectoryLabel(downloadTreeUri),
+            rootCleanupEnabled = rootCleanupEnabled,
+            rootStatus = rootStatus,
             onDismiss = { showSettings = false },
             onSaveToken = { token ->
                 saveGithubToken(context, token)
@@ -435,6 +460,31 @@ private fun HubScreen(context: Context) {
                     "已恢复默认目录 Downloads/YagaYHub",
                     Toast.LENGTH_SHORT
                 ).show()
+            },
+            onRootCleanupChanged = { enabled ->
+                rootCleanupEnabled = enabled
+                saveRootCleanupEnabled(context, enabled)
+                if (enabled) {
+                    rootStatus = RootStatus.NOT_CHECKED
+                    scope.launch {
+                        rootStatus = withContext(Dispatchers.IO) {
+                            if (hasRootAccess()) {
+                                RootStatus.AVAILABLE
+                            } else {
+                                RootStatus.UNAVAILABLE
+                            }
+                        }
+                        if (rootStatus == RootStatus.UNAVAILABLE) {
+                            Toast.makeText(
+                                context,
+                                "未获得 Root，下载时将自动回退普通清理",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                } else {
+                    rootStatus = RootStatus.NOT_CHECKED
+                }
             },
             onAuthorize = { clientId ->
                 saveGithubClientId(context, clientId)
@@ -506,11 +556,14 @@ private fun GitHubSettingsDialog(
     currentToken: String,
     currentClientId: String,
     downloadDirectoryLabel: String,
+    rootCleanupEnabled: Boolean,
+    rootStatus: RootStatus,
     onDismiss: () -> Unit,
     onSaveToken: (String) -> Unit,
     onClearToken: () -> Unit,
     onChooseDownloadDirectory: () -> Unit,
     onResetDownloadDirectory: () -> Unit,
+    onRootCleanupChanged: (Boolean) -> Unit,
     onAuthorize: (String) -> Unit,
 ) {
     var token by remember(currentToken) { mutableStateOf(currentToken) }
@@ -538,6 +591,24 @@ private fun GitHubSettingsDialog(
                     TextButton(onClick = onResetDownloadDirectory) {
                         Text("恢复默认")
                     }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Root 增强清理")
+                        Text(
+                            "状态：" + rootStatus.label + " · 定向删除旧 ZIP / 重复项 / 临时残留",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = rootCleanupEnabled,
+                        onCheckedChange = onRootCleanupChanged,
+                    )
                 }
                 OutlinedTextField(
                     value = clientId,
@@ -1196,6 +1267,7 @@ private fun downloadArtifactZip(
     artifactId: Long,
     token: String,
     destinationTreeUri: String,
+    rootEnhancedCleanup: Boolean,
 ): DownloadResult {
     var apiConnection: HttpURLConnection? = null
     var downloadConnection: HttpURLConnection? = null
@@ -1240,6 +1312,20 @@ private fun downloadArtifactZip(
         }
 
         val fileName = repo + ".zip"
+        val rootDirectory = if (rootEnhancedCleanup) {
+            resolveDownloadPhysicalDirectory(destinationTreeUri)
+        } else {
+            null
+        }
+        val rootCleanupApplied = rootDirectory?.let { directory ->
+            rootCleanupDownloadDirectory(
+                context = context,
+                directory = directory,
+                repo = repo,
+                keepCurrentZip = false,
+            )
+        } == true
+
         val destination = if (destinationTreeUri.isBlank()) {
             prepareDefaultDownloadDestination(context, fileName)
         } else {
@@ -1259,9 +1345,19 @@ private fun downloadArtifactZip(
 
         destination.finish?.invoke()
 
+        if (rootCleanupApplied && rootDirectory != null) {
+            rootCleanupDownloadDirectory(
+                context = context,
+                directory = rootDirectory,
+                repo = repo,
+                keepCurrentZip = true,
+            )
+        }
+
         DownloadResult(
             true,
-            "已保存到 " + destination.displayPath,
+            "已保存到 " + destination.displayPath +
+                if (rootCleanupApplied) " · Root 清理完成" else "",
         )
     } catch (e: Exception) {
         outputUri?.let { uri ->
@@ -1278,6 +1374,124 @@ private fun downloadArtifactZip(
         apiConnection?.disconnect()
     }
 }
+
+private fun hasRootAccess(): Boolean {
+    val result = runRootCommand("id")
+    return result.exitCode == 0 && result.output.contains("uid=0")
+}
+
+private data class RootCommandResult(
+    val exitCode: Int,
+    val output: String,
+)
+
+private fun runRootCommand(command: String): RootCommandResult {
+    return try {
+        val process = ProcessBuilder("su", "-c", command)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
+        val exitCode = process.waitFor()
+        RootCommandResult(exitCode, output)
+    } catch (_: Exception) {
+        RootCommandResult(-1, "")
+    }
+}
+
+private fun shellQuote(value: String): String =
+    "'" + value.replace("'", "'\\''") + "'"
+
+private fun resolveDownloadPhysicalDirectory(treeUriString: String): File? {
+    if (treeUriString.isBlank()) {
+        return File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "YagaYHub",
+        )
+    }
+
+    val treeUri = runCatching { Uri.parse(treeUriString) }.getOrNull() ?: return null
+    if (treeUri.authority != "com.android.externalstorage.documents") return null
+
+    val documentId = runCatching {
+        DocumentsContract.getTreeDocumentId(treeUri)
+    }.getOrNull() ?: return null
+    val parts = documentId.split(":", limit = 2)
+    val volume = parts.firstOrNull().orEmpty()
+    val relative = parts.getOrNull(1).orEmpty()
+
+    val base = when {
+        volume.equals("primary", ignoreCase = true) ->
+            Environment.getExternalStorageDirectory()
+        volume.isNotBlank() -> File("/storage", volume)
+        else -> return null
+    }
+    return if (relative.isBlank()) base else File(base, relative)
+}
+
+private fun rootCleanupDownloadDirectory(
+    context: Context,
+    directory: File,
+    repo: String,
+    keepCurrentZip: Boolean,
+): Boolean {
+    val listCommand = "find " + shellQuote(directory.absolutePath) +
+        " -maxdepth 1 -type f 2>/dev/null"
+    val listed = runRootCommand(listCommand)
+    if (listed.exitCode != 0 && !directory.exists()) return false
+
+    val stableName = repo + ".zip"
+    val duplicatePrefix = repo + " ("
+    val tempPrefixes = listOf(
+        stableName + ".",
+        "." + stableName,
+        repo + ".tmp",
+        repo + ".part",
+    )
+
+    val targets = listed.output
+        .lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .map(::File)
+        .filter { file ->
+            val name = file.name
+            when {
+                !keepCurrentZip && name == stableName -> true
+                name.startsWith(duplicatePrefix) && name.endsWith(").zip") -> true
+                tempPrefixes.any { prefix -> name.startsWith(prefix) } -> true
+                else -> false
+            }
+        }
+        .distinctBy { it.absolutePath }
+        .toList()
+
+    targets.forEach { file ->
+        runRootCommand("rm -f -- " + shellQuote(file.absolutePath))
+    }
+
+    clearOwnDownloadCache(context)
+    runRootCommand("sync")
+    return true
+}
+
+private fun clearOwnDownloadCache(context: Context) {
+    runCatching {
+        context.cacheDir.listFiles()?.forEach { child ->
+            child.deleteRecursively()
+        }
+    }
+}
+
+private fun saveRootCleanupEnabled(context: Context, enabled: Boolean) {
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean(ROOT_CLEANUP_ENABLED, enabled)
+        .apply()
+}
+
+private fun loadRootCleanupEnabled(context: Context): Boolean =
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .getBoolean(ROOT_CLEANUP_ENABLED, false)
 
 private data class DownloadDestination(
     val uri: Uri,
@@ -1658,6 +1872,7 @@ private const val TOKEN_IV = "token_iv"
 private const val TOKEN_DATA = "token_data"
 private const val GITHUB_CLIENT_ID = "github_client_id"
 private const val DOWNLOAD_TREE_URI = "download_tree_uri"
+private const val ROOT_CLEANUP_ENABLED = "root_cleanup_enabled"
 private const val TOKEN_KEY_ALIAS = "YagaYHubGitHubToken"
 
 private fun getPackageInfoCompat(pm: PackageManager, packageName: String): PackageInfo? = runCatching {
