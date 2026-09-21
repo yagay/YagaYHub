@@ -20,6 +20,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -167,7 +168,7 @@ private fun HubScreen(context: Context) {
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        "单击打开 · 长按详情",
+                        "单击打开 · 长按详情 · Actions 一键构建入口",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -241,6 +242,11 @@ private fun HubScreen(context: Context) {
                                         app.repo != null -> openUrl(context, "https://github.com/yagay/${app.repo}")
                                     }
                                 },
+                                onActionsClick = {
+                                    app.repo?.let { repo ->
+                                        openUrl(context, "https://github.com/yagay/$repo/actions")
+                                    }
+                                },
                             )
                         }
                     }
@@ -256,6 +262,7 @@ private fun AppEntry(
     app: HubApp,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onActionsClick: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -308,6 +315,18 @@ private fun AppEntry(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
         )
+        if (app.repo != null) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "Actions",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onActionsClick)
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
+            )
+        }
     }
 }
 
