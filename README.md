@@ -2,8 +2,11 @@
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
 
-## 1.6.7
+## 1.6.8
 
+- GitHub 登录改为首次安装也无需填写 Client ID / Client Secret：正式构建从 GitHub Actions Secrets 注入 OAuth 配置，App 内默认只显示 `登录 GitHub`。
+- 登录按钮直接打开 GitHub 官方账号选择/登录页，可使用账号密码、2FA 或 Passkey；YagaYHub 不读取或保存 GitHub 密码。
+- OAuth 仍使用 Authorization Code + PKCE；高级设置仅作为未注入构建配置时的备用入口。
 - 新增 GitHub 网页登录授权：使用 Chrome Custom Tab 打开 GitHub 登录/授权页面，授权完成后自动返回 YagaYHub。
 - 网页登录使用 Authorization Code + PKCE，并通过本机 loopback `127.0.0.1` 临时端口接收回调；GitHub App Callback URL 需配置为 `http://127.0.0.1/oauth/callback`。
 - GitHub App Client Secret 仅保存在本机，使用 Android Keystore + AES/GCM 加密；Device Flow 与 Fine-grained Token 继续作为备用方式。
