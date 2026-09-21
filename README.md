@@ -2,13 +2,14 @@
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
 
-## 1.4.3
+## 1.4.4
 
 - 每个已登记 GitHub 仓库的 App 条目新增带运行图标的 `Actions` 一键入口。
 - 直接显示最近一次 Actions 状态：成功、失败、运行中、排队中、已取消、无记录或未知。
 - 只扫描每个仓库最新一次 Actions，不再向前查找更早的成功构建。
 - 只有最新一次 Actions 状态为成功时，才继续读取该 run 的未过期 artifact ZIP；失败、运行中、排队中、取消等状态都不会抓取 ZIP。
 - 下载图标仅在最新成功构建存在可用 artifact 时高亮；点击后直接打开该次构建的 ZIP 下载入口。
+- 显示 artifact ZIP 大小（KB / MB / GB）；仅当最新一次 Actions 成功且存在未过期 artifact 时读取和显示。
 - 点击 `Actions` 直接打开对应仓库的 GitHub Actions 页面，便于查看或触发工作流。
 - 自动发现但尚未登记 GitHub 仓库的 App 不显示 `Actions` 入口。
 
