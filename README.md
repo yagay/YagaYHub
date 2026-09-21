@@ -2,6 +2,12 @@
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
 
+## 1.4.0
+
+- 每个已登记 GitHub 仓库的 App 条目新增 `Actions` 一键入口。
+- 点击 `Actions` 直接打开对应仓库的 GitHub Actions 页面，便于查看或触发工作流。
+- 自动发现但尚未登记 GitHub 仓库的 App 不显示 `Actions` 入口。
+
 ## v1.0.0
 
 - 显示已知项目，即使尚未安装也能看到。
