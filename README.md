@@ -2,8 +2,13 @@
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
 
-## 1.6.3
+## 1.6.4
 
+- 下载成功后自动解压 artifact ZIP 内的 APK，并把 APK 保存到当前下载目录；同名 APK 会覆盖旧文件。
+- ZIP 内多个 APK 会全部解压，并优先选择 `release` / `universal` / `base.apk` / `app-*` 作为主 APK，自动调用系统安装器打开。
+- APK 文件名会过滤路径和非法字符，避免 ZIP 目录结构写出到目标目录。
+- 新增 `REQUEST_INSTALL_PACKAGES`；首次未授权“安装未知应用”时自动打开系统授权页，返回后直接继续打开刚解压的 APK，无需重新下载。
+- ZIP 内没有 APK 时只保留 ZIP 并提示，不触发安装器。
 - 设置新增 `Root 增强清理` 开关，默认关闭；开启时通过 `su` 检测 Root 授权，未授权会自动回退普通清理。
 - Root 模式下载前会定向删除当前仓库的旧 `仓库名.zip`、`仓库名 (n).zip`、`.tmp` / `.part` 等残留，下载后再次清理重复项并执行 `sync`。
 - Root 清理仅作用于 YagaYHub 下载目录和 YagaYHub 自身缓存，不执行全盘扫描、`fstrim` 或其他全局擦除。
