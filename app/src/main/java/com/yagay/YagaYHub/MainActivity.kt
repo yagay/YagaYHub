@@ -16,6 +16,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
@@ -36,7 +37,9 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -188,7 +191,24 @@ private fun HubScreen(context: Context) {
     var deviceAuth by remember { mutableStateOf<DeviceAuthInfo?>(null) }
     var authPolling by remember { mutableStateOf(false) }
     var authStatus by remember { mutableStateOf("") }
+    var downloadTreeUri by remember { mutableStateOf(loadDownloadDirectoryUri(context)) }
     val scope = rememberCoroutineScope()
+    val directoryPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            saveDownloadDirectoryUri(context, uri.toString())
+            downloadTreeUri = uri.toString()
+            Toast.makeText(context, "下载目录已更新", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     LaunchedEffect(refreshKey, githubToken) {
         val loadedApps = loadHubApps(context)
@@ -367,6 +387,7 @@ private fun HubScreen(context: Context) {
                                                         runId = runId,
                                                         artifactId = artifactId,
                                                         token = githubToken,
+                                                        destinationTreeUri = downloadTreeUri,
                                                     )
                                                 }
                                                 Toast.makeText(
@@ -390,6 +411,7 @@ private fun HubScreen(context: Context) {
         GitHubSettingsDialog(
             currentToken = githubToken,
             currentClientId = githubClientId,
+            downloadDirectoryLabel = downloadDirectoryLabel(downloadTreeUri),
             onDismiss = { showSettings = false },
             onSaveToken = { token ->
                 saveGithubToken(context, token)
@@ -401,6 +423,18 @@ private fun HubScreen(context: Context) {
                 clearGithubToken(context)
                 githubToken = ""
                 Toast.makeText(context, "GitHub Token 已清除", Toast.LENGTH_SHORT).show()
+            },
+            onChooseDownloadDirectory = {
+                directoryPicker.launch(null)
+            },
+            onResetDownloadDirectory = {
+                clearDownloadDirectoryUri(context)
+                downloadTreeUri = ""
+                Toast.makeText(
+                    context,
+                    "已恢复默认目录 Downloads/YagaYHub",
+                    Toast.LENGTH_SHORT
+                ).show()
             },
             onAuthorize = { clientId ->
                 saveGithubClientId(context, clientId)
@@ -471,9 +505,12 @@ private fun HubScreen(context: Context) {
 private fun GitHubSettingsDialog(
     currentToken: String,
     currentClientId: String,
+    downloadDirectoryLabel: String,
     onDismiss: () -> Unit,
     onSaveToken: (String) -> Unit,
     onClearToken: () -> Unit,
+    onChooseDownloadDirectory: () -> Unit,
+    onResetDownloadDirectory: () -> Unit,
     onAuthorize: (String) -> Unit,
 ) {
     var token by remember(currentToken) { mutableStateOf(currentToken) }
@@ -489,6 +526,19 @@ private fun GitHubSettingsDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Text(
+                    "下载目录：" + downloadDirectoryLabel,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TextButton(onClick = onChooseDownloadDirectory) {
+                        Text("选择目录")
+                    }
+                    TextButton(onClick = onResetDownloadDirectory) {
+                        Text("恢复默认")
+                    }
+                }
                 OutlinedTextField(
                     value = clientId,
                     onValueChange = { clientId = it.trim() },
@@ -1141,6 +1191,7 @@ private fun downloadArtifactZip(
     runId: Long,
     artifactId: Long,
     token: String,
+    destinationTreeUri: String,
 ): DownloadResult {
     var apiConnection: HttpURLConnection? = null
     var downloadConnection: HttpURLConnection? = null
@@ -1180,35 +1231,29 @@ private fun downloadArtifactZip(
             }
         }
 
-        val fileName = repo + "-" + runId + ".zip"
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-            put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/YagaYHub")
-            put(MediaStore.MediaColumns.IS_PENDING, 1)
-        }
+        val fileName = repo + ".zip"
+        val destination = if (destinationTreeUri.isBlank()) {
+            prepareDefaultDownloadDestination(context, fileName)
+        } else {
+            prepareTreeDownloadDestination(
+                context = context,
+                treeUriString = destinationTreeUri,
+                fileName = fileName,
+            )
+        } ?: return DownloadResult(false, "无法创建下载文件")
 
-        outputUri = context.contentResolver.insert(
-            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-            values,
-        ) ?: return DownloadResult(false, "无法创建下载文件")
-
-        context.contentResolver.openOutputStream(outputUri)?.use { output ->
+        outputUri = destination.uri
+        context.contentResolver.openOutputStream(destination.uri, "w")?.use { output ->
             streamConnection.inputStream.use { input ->
                 input.copyTo(output)
             }
         } ?: return DownloadResult(false, "无法写入下载文件")
 
-        context.contentResolver.update(
-            outputUri,
-            ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
-            null,
-            null,
-        )
+        destination.finish?.invoke()
 
         DownloadResult(
             true,
-            "已保存到 Downloads/YagaYHub/" + fileName,
+            "已保存到 " + destination.displayPath,
         )
     } catch (e: Exception) {
         outputUri?.let { uri ->
@@ -1225,6 +1270,157 @@ private fun downloadArtifactZip(
         apiConnection?.disconnect()
     }
 }
+
+private data class DownloadDestination(
+    val uri: Uri,
+    val displayPath: String,
+    val finish: (() -> Unit)? = null,
+)
+
+private fun prepareDefaultDownloadDestination(
+    context: Context,
+    fileName: String,
+): DownloadDestination? {
+    val resolver = context.contentResolver
+    val relativePath = Environment.DIRECTORY_DOWNLOADS + "/YagaYHub/"
+
+    // 同名文件先删除，避免系统生成 (1)、(2)。
+    resolver.query(
+        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+        arrayOf(MediaStore.MediaColumns._ID),
+        MediaStore.MediaColumns.DISPLAY_NAME + "=? AND " +
+            MediaStore.MediaColumns.RELATIVE_PATH + "=?",
+        arrayOf(fileName, relativePath),
+        null,
+    )?.use { cursor ->
+        val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+        while (cursor.moveToNext()) {
+            val existingUri = Uri.withAppendedPath(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                cursor.getLong(idColumn).toString(),
+            )
+            runCatching { resolver.delete(existingUri, null, null) }
+        }
+    }
+
+    val values = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+        put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+        put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+        put(MediaStore.MediaColumns.IS_PENDING, 1)
+    }
+
+    val uri = resolver.insert(
+        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+        values,
+    ) ?: return null
+
+    return DownloadDestination(
+        uri = uri,
+        displayPath = "Downloads/YagaYHub/" + fileName,
+        finish = {
+            resolver.update(
+                uri,
+                ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                },
+                null,
+                null,
+            )
+        },
+    )
+}
+
+private fun prepareTreeDownloadDestination(
+    context: Context,
+    treeUriString: String,
+    fileName: String,
+): DownloadDestination? {
+    val resolver = context.contentResolver
+    val treeUri = runCatching { Uri.parse(treeUriString) }.getOrNull() ?: return null
+    val parentDocumentUri = runCatching {
+        DocumentsContract.buildDocumentUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri),
+        )
+    }.getOrNull() ?: return null
+    val childrenUri = runCatching {
+        DocumentsContract.buildChildDocumentsUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri),
+        )
+    }.getOrNull() ?: return null
+
+    // 自定义目录也执行同名覆盖。
+    resolver.query(
+        childrenUri,
+        arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        ),
+        null,
+        null,
+        null,
+    )?.use { cursor ->
+        val idColumn = cursor.getColumnIndexOrThrow(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID
+        )
+        val nameColumn = cursor.getColumnIndexOrThrow(
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME
+        )
+        while (cursor.moveToNext()) {
+            if (cursor.getString(nameColumn) == fileName) {
+                val existingUri = DocumentsContract.buildDocumentUriUsingTree(
+                    treeUri,
+                    cursor.getString(idColumn),
+                )
+                runCatching {
+                    DocumentsContract.deleteDocument(resolver, existingUri)
+                }
+            }
+        }
+    }
+
+    val uri = runCatching {
+        DocumentsContract.createDocument(
+            resolver,
+            parentDocumentUri,
+            "application/zip",
+            fileName,
+        )
+    }.getOrNull() ?: return null
+
+    return DownloadDestination(
+        uri = uri,
+        displayPath = "自定义目录/" + fileName,
+    )
+}
+
+private fun saveDownloadDirectoryUri(context: Context, uri: String) {
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(DOWNLOAD_TREE_URI, uri)
+        .apply()
+}
+
+private fun loadDownloadDirectoryUri(context: Context): String =
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .getString(DOWNLOAD_TREE_URI, "")
+        .orEmpty()
+
+private fun clearDownloadDirectoryUri(context: Context) {
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .remove(DOWNLOAD_TREE_URI)
+        .apply()
+}
+
+private fun downloadDirectoryLabel(treeUri: String): String =
+    if (treeUri.isBlank()) {
+        "Downloads/YagaYHub"
+    } else {
+        "自定义目录"
+    }
 
 private data class DeviceAuthInfo(
     val deviceCode: String,
@@ -1401,6 +1597,7 @@ private const val TOKEN_PREFS = "github_secure"
 private const val TOKEN_IV = "token_iv"
 private const val TOKEN_DATA = "token_data"
 private const val GITHUB_CLIENT_ID = "github_client_id"
+private const val DOWNLOAD_TREE_URI = "download_tree_uri"
 private const val TOKEN_KEY_ALIAS = "YagaYHubGitHubToken"
 
 private fun getPackageInfoCompat(pm: PackageManager, packageName: String): PackageInfo? = runCatching {
