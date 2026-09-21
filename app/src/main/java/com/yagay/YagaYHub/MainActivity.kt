@@ -1,6 +1,14 @@
 package com.yagay.YagaYHub
 
+import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.ActivityNotFoundException
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
@@ -15,6 +23,7 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.IBinder
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.provider.MediaStore
@@ -89,6 +98,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -106,6 +116,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -123,6 +134,139 @@ class MainActivity : ComponentActivity() {
                     HubScreen(this)
                 }
             }
+        }
+    }
+}
+
+class ArtifactDownloadService : Service() {
+    @Volatile
+    private var running = false
+    private var worker: Thread? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        ensureDownloadNotificationChannel(this)
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (running || intent == null) return START_NOT_STICKY
+
+        val request = ArtifactDownloadRequest.fromIntent(intent) ?: return START_NOT_STICKY
+        running = true
+
+        val initialState = DownloadUiState(
+            appName = request.appName,
+            stage = "准备后台下载",
+            totalBytes = request.expectedSizeBytes,
+            running = true,
+        )
+        saveDownloadUiState(this, initialState)
+        broadcastDownloadState(this, initialState)
+        startForeground(
+            DOWNLOAD_NOTIFICATION_ID,
+            buildDownloadNotification(this, initialState),
+        )
+
+        worker = Thread {
+            val token = loadGithubToken(this)
+            val destinationTreeUri = loadDownloadDirectoryUri(this)
+            val rootEnhanced = loadRootCleanupEnabled(this) && hasRootAccess()
+            var latestDownloaded = 0L
+            var latestTotal = request.expectedSizeBytes
+
+            val result = downloadArtifactZip(
+                context = this,
+                owner = request.owner,
+                repo = request.repo,
+                runId = request.runId,
+                artifactId = request.artifactId,
+                token = token,
+                destinationTreeUri = destinationTreeUri,
+                rootEnhancedCleanup = rootEnhanced,
+                expectedSizeBytes = request.expectedSizeBytes,
+                onProgress = { downloaded, total, stage ->
+                    latestDownloaded = downloaded
+                    latestTotal = total ?: latestTotal
+                    val state = DownloadUiState(
+                        appName = request.appName,
+                        stage = stage,
+                        downloadedBytes = downloaded,
+                        totalBytes = latestTotal,
+                        running = true,
+                    )
+                    broadcastDownloadState(this, state)
+                    updateDownloadNotification(this, state)
+                },
+            )
+
+            val finalState = DownloadUiState(
+                appName = request.appName,
+                stage = if (result.success) "下载完成" else "下载失败",
+                downloadedBytes = latestDownloaded,
+                totalBytes = latestTotal,
+                running = false,
+                message = result.message,
+                apks = result.extractedApks,
+            )
+            saveDownloadUiState(this, finalState)
+            broadcastDownloadState(this, finalState)
+            updateDownloadNotification(this, finalState)
+            running = false
+            stopForeground(STOP_FOREGROUND_DETACH)
+            stopSelf(startId)
+        }.apply {
+            name = "YagaYHub-ArtifactDownload"
+            start()
+        }
+
+        return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        worker = null
+    }
+}
+
+private data class ArtifactDownloadRequest(
+    val appName: String,
+    val owner: String,
+    val repo: String,
+    val runId: Long,
+    val artifactId: Long,
+    val expectedSizeBytes: Long?,
+) {
+    fun toIntent(context: Context): Intent =
+        Intent(context, ArtifactDownloadService::class.java).apply {
+            putExtra(EXTRA_DOWNLOAD_APP_NAME, appName)
+            putExtra(EXTRA_DOWNLOAD_OWNER, owner)
+            putExtra(EXTRA_DOWNLOAD_REPO, repo)
+            putExtra(EXTRA_DOWNLOAD_RUN_ID, runId)
+            putExtra(EXTRA_DOWNLOAD_ARTIFACT_ID, artifactId)
+            expectedSizeBytes?.let { putExtra(EXTRA_DOWNLOAD_EXPECTED_SIZE, it) }
+        }
+
+    companion object {
+        fun fromIntent(intent: Intent): ArtifactDownloadRequest? {
+            val appName = intent.getStringExtra(EXTRA_DOWNLOAD_APP_NAME) ?: return null
+            val owner = intent.getStringExtra(EXTRA_DOWNLOAD_OWNER) ?: return null
+            val repo = intent.getStringExtra(EXTRA_DOWNLOAD_REPO) ?: return null
+            val runId = intent.getLongExtra(EXTRA_DOWNLOAD_RUN_ID, -1L)
+            val artifactId = intent.getLongExtra(EXTRA_DOWNLOAD_ARTIFACT_ID, -1L)
+            if (runId <= 0L || artifactId <= 0L) return null
+            return ArtifactDownloadRequest(
+                appName = appName,
+                owner = owner,
+                repo = repo,
+                runId = runId,
+                artifactId = artifactId,
+                expectedSizeBytes = intent.getLongExtra(
+                    EXTRA_DOWNLOAD_EXPECTED_SIZE,
+                    -1L,
+                ).takeIf { it > 0L },
+            )
         }
     }
 }
@@ -226,8 +370,11 @@ private fun HubScreen(context: Context) {
     var rootStatus by remember { mutableStateOf(RootStatus.NOT_CHECKED) }
     var layoutMode by remember { mutableStateOf(loadLayoutMode(context)) }
     var pendingInstallApk by remember { mutableStateOf<ExtractedApk?>(null) }
-    var downloadUiState by remember { mutableStateOf<DownloadUiState?>(null) }
-    var showDownloadPanel by remember { mutableStateOf(false) }
+    var downloadUiState by remember { mutableStateOf(loadDownloadUiState(context)) }
+    var showDownloadPanel by remember {
+        mutableStateOf(downloadUiState?.let { !it.running } == true)
+    }
+    var pendingDownloadRequest by remember { mutableStateOf<ArtifactDownloadRequest?>(null) }
     val scope = rememberCoroutineScope()
     val directoryPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -243,6 +390,45 @@ private fun HubScreen(context: Context) {
             saveDownloadDirectoryUri(context, uri.toString())
             downloadTreeUri = uri.toString()
             Toast.makeText(context, "下载目录已更新", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        pendingDownloadRequest?.let { request ->
+            startArtifactDownloadService(context, request)
+            if (!granted) {
+                Toast.makeText(
+                    context,
+                    "通知权限未授予；后台下载仍会继续，但通知栏进度可能不可见",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+        pendingDownloadRequest = null
+    }
+
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context?, intent: Intent?) {
+                if (intent?.action != ACTION_DOWNLOAD_STATE) return
+                val state = downloadUiStateFromIntent(intent) ?: return
+                downloadUiState = state
+                if (!state.running) {
+                    showDownloadPanel = true
+                }
+            }
+        }
+        val filter = IntentFilter(ACTION_DOWNLOAD_STATE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            context.registerReceiver(receiver, filter)
+        }
+        onDispose {
+            runCatching { context.unregisterReceiver(receiver) }
         }
     }
 
@@ -449,68 +635,39 @@ private fun HubScreen(context: Context) {
                                 showSettings = true
                             }
                             else -> {
+                                val request = ArtifactDownloadRequest(
+                                    appName = app.name,
+                                    owner = app.repoOwner,
+                                    repo = repo,
+                                    runId = runId,
+                                    artifactId = artifactId,
+                                    expectedSizeBytes = app.latestArtifactSizeBytes,
+                                )
+                                if (downloadUiState?.running == true) {
+                                    Toast.makeText(
+                                        context,
+                                        "已有后台下载正在进行",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                } else if (
+                                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                    context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                                        PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    pendingDownloadRequest = request
+                                    notificationPermissionLauncher.launch(
+                                        Manifest.permission.POST_NOTIFICATIONS
+                                    )
+                                } else {
+                                    startArtifactDownloadService(context, request)
+                                }
                                 downloadUiState = DownloadUiState(
                                     appName = app.name,
+                                    stage = "准备后台下载",
                                     totalBytes = app.latestArtifactSizeBytes,
+                                    running = true,
                                 )
                                 showDownloadPanel = true
-                                scope.launch {
-                                    val result = withContext(Dispatchers.IO) {
-                                        downloadArtifactZip(
-                                            context = context,
-                                            owner = app.repoOwner,
-                                            repo = repo,
-                                            runId = runId,
-                                            artifactId = artifactId,
-                                            token = githubToken,
-                                            destinationTreeUri = downloadTreeUri,
-                                            rootEnhancedCleanup = rootCleanupEnabled &&
-                                                rootStatus == RootStatus.AVAILABLE,
-                                            expectedSizeBytes = app.latestArtifactSizeBytes,
-                                            onProgress = { downloaded, total, stage ->
-                                                context.mainExecutor.execute {
-                                                    val current = downloadUiState
-                                                    if (current != null && current.appName == app.name) {
-                                                        downloadUiState = current.copy(
-                                                            stage = stage,
-                                                            downloadedBytes = downloaded,
-                                                            totalBytes = total ?: current.totalBytes,
-                                                        )
-                                                    }
-                                                }
-                                            },
-                                        )
-                                    }
-
-                                    downloadUiState = DownloadUiState(
-                                        appName = app.name,
-                                        stage = if (result.success) "完成" else "失败",
-                                        downloadedBytes = downloadUiState?.downloadedBytes ?: 0L,
-                                        totalBytes = downloadUiState?.totalBytes,
-                                        running = false,
-                                        message = result.message,
-                                        apks = result.extractedApks,
-                                    )
-                                    showDownloadPanel = true
-
-                                    if (result.success && result.extractedApks.size == 1) {
-                                        val primaryApk = result.extractedApks.first()
-                                        if (
-                                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                                            !context.packageManager.canRequestPackageInstalls()
-                                        ) {
-                                            pendingInstallApk = primaryApk
-                                            unknownSourcesLauncher.launch(
-                                                Intent(
-                                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                                    Uri.parse("package:" + context.packageName),
-                                                )
-                                            )
-                                        } else {
-                                            openExtractedApk(context, primaryApk)
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
@@ -818,6 +975,205 @@ private fun GitHubSettingsDialog(
     )
 }
 
+private fun startArtifactDownloadService(
+    context: Context,
+    request: ArtifactDownloadRequest,
+) {
+    val state = DownloadUiState(
+        appName = request.appName,
+        stage = "准备后台下载",
+        totalBytes = request.expectedSizeBytes,
+        running = true,
+    )
+    saveDownloadUiState(context, state)
+    ContextCompat.startForegroundService(context, request.toIntent(context))
+}
+
+private fun ensureDownloadNotificationChannel(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+    val manager = context.getSystemService(NotificationManager::class.java)
+    manager.createNotificationChannel(
+        NotificationChannel(
+            DOWNLOAD_CHANNEL_ID,
+            "YagaYHub 下载",
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = "GitHub Actions artifact 后台下载进度"
+            setShowBadge(false)
+        }
+    )
+}
+
+private fun buildDownloadNotification(
+    context: Context,
+    state: DownloadUiState,
+): Notification {
+    val openAppIntent = Intent(context, MainActivity::class.java).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+    }
+    val pendingIntent = PendingIntent.getActivity(
+        context,
+        1001,
+        openAppIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+    val total = state.totalBytes?.takeIf { it > 0L }
+    val progressPercent = if (total != null) {
+        ((state.downloadedBytes * 100L) / total)
+            .coerceIn(0L, 100L)
+            .toInt()
+    } else {
+        0
+    }
+    val sizeText = if (total != null) {
+        formatFileSize(state.downloadedBytes) + " / " + formatFileSize(total)
+    } else if (state.downloadedBytes > 0L) {
+        formatFileSize(state.downloadedBytes)
+    } else {
+        ""
+    }
+    val contentText = buildString {
+        append(state.stage)
+        if (sizeText.isNotBlank()) {
+            append(" · ")
+            append(sizeText)
+        }
+    }
+
+    return Notification.Builder(context, DOWNLOAD_CHANNEL_ID)
+        .setSmallIcon(
+            if (state.running) {
+                android.R.drawable.stat_sys_download
+            } else {
+                android.R.drawable.stat_sys_download_done
+            }
+        )
+        .setContentTitle("YagaYHub · " + state.appName)
+        .setContentText(contentText)
+        .setContentIntent(pendingIntent)
+        .setOnlyAlertOnce(true)
+        .setOngoing(state.running)
+        .setAutoCancel(!state.running)
+        .apply {
+            when {
+                state.running && total != null ->
+                    setProgress(100, progressPercent, false)
+                state.running ->
+                    setProgress(0, 0, true)
+                else ->
+                    setProgress(0, 0, false)
+            }
+        }
+        .build()
+}
+
+private fun updateDownloadNotification(
+    context: Context,
+    state: DownloadUiState,
+) {
+    context.getSystemService(NotificationManager::class.java)
+        .notify(DOWNLOAD_NOTIFICATION_ID, buildDownloadNotification(context, state))
+}
+
+private fun broadcastDownloadState(
+    context: Context,
+    state: DownloadUiState,
+) {
+    context.sendBroadcast(
+        Intent(ACTION_DOWNLOAD_STATE).apply {
+            setPackage(context.packageName)
+            putExtra(EXTRA_STATE_APP_NAME, state.appName)
+            putExtra(EXTRA_STATE_STAGE, state.stage)
+            putExtra(EXTRA_STATE_DOWNLOADED, state.downloadedBytes)
+            state.totalBytes?.let { putExtra(EXTRA_STATE_TOTAL, it) }
+            putExtra(EXTRA_STATE_RUNNING, state.running)
+            state.message?.let { putExtra(EXTRA_STATE_MESSAGE, it) }
+            putStringArrayListExtra(
+                EXTRA_STATE_APK_NAMES,
+                ArrayList(state.apks.map { it.name }),
+            )
+            putStringArrayListExtra(
+                EXTRA_STATE_APK_URIS,
+                ArrayList(state.apks.map { it.uri.toString() }),
+            )
+        }
+    )
+}
+
+private fun downloadUiStateFromIntent(intent: Intent): DownloadUiState? {
+    val appName = intent.getStringExtra(EXTRA_STATE_APP_NAME) ?: return null
+    val names = intent.getStringArrayListExtra(EXTRA_STATE_APK_NAMES).orEmpty()
+    val uris = intent.getStringArrayListExtra(EXTRA_STATE_APK_URIS).orEmpty()
+    val apks = names.zip(uris).map { (name, uri) ->
+        ExtractedApk(name, Uri.parse(uri))
+    }
+    return DownloadUiState(
+        appName = appName,
+        stage = intent.getStringExtra(EXTRA_STATE_STAGE).orEmpty(),
+        downloadedBytes = intent.getLongExtra(EXTRA_STATE_DOWNLOADED, 0L),
+        totalBytes = intent.getLongExtra(EXTRA_STATE_TOTAL, -1L).takeIf { it > 0L },
+        running = intent.getBooleanExtra(EXTRA_STATE_RUNNING, false),
+        message = intent.getStringExtra(EXTRA_STATE_MESSAGE),
+        apks = apks,
+    )
+}
+
+private fun saveDownloadUiState(context: Context, state: DownloadUiState) {
+    val json = JSONObject().apply {
+        put("appName", state.appName)
+        put("stage", state.stage)
+        put("downloadedBytes", state.downloadedBytes)
+        put("totalBytes", state.totalBytes ?: JSONObject.NULL)
+        put("running", state.running)
+        put("message", state.message ?: JSONObject.NULL)
+        put(
+            "apks",
+            JSONArray().apply {
+                state.apks.forEach { apk ->
+                    put(
+                        JSONObject()
+                            .put("name", apk.name)
+                            .put("uri", apk.uri.toString())
+                    )
+                }
+            }
+        )
+    }
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(DOWNLOAD_STATE_JSON, json.toString())
+        .apply()
+}
+
+private fun loadDownloadUiState(context: Context): DownloadUiState? {
+    val raw = context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .getString(DOWNLOAD_STATE_JSON, null)
+        ?: return null
+    return runCatching {
+        val json = JSONObject(raw)
+        val apkArray = json.optJSONArray("apks") ?: JSONArray()
+        val apks = buildList {
+            for (index in 0 until apkArray.length()) {
+                val item = apkArray.getJSONObject(index)
+                val name = item.optString("name")
+                val uri = item.optString("uri")
+                if (name.isNotBlank() && uri.isNotBlank()) {
+                    add(ExtractedApk(name, Uri.parse(uri)))
+                }
+            }
+        }
+        DownloadUiState(
+            appName = json.getString("appName"),
+            stage = json.optString("stage"),
+            downloadedBytes = json.optLong("downloadedBytes", 0L),
+            totalBytes = if (json.isNull("totalBytes")) null else json.optLong("totalBytes"),
+            running = json.optBoolean("running", false),
+            message = if (json.isNull("message")) null else json.optString("message"),
+            apks = apks,
+        )
+    }.getOrNull()
+}
+
 @Composable
 private fun DownloadPanel(
     state: DownloadUiState,
@@ -832,9 +1188,7 @@ private fun DownloadPanel(
     }
 
     AlertDialog(
-        onDismissRequest = {
-            if (!state.running) onDismiss()
-        },
+        onDismissRequest = onDismiss,
         title = { Text("下载 · " + state.appName) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -909,7 +1263,7 @@ private fun DownloadPanel(
                                     }
                                 }
                                 Text(
-                                    "安装",
+                                    "Install",
                                     style = MaterialTheme.typography.labelLarge,
                                     color = MaterialTheme.colorScheme.primary,
                                 )
@@ -926,10 +1280,8 @@ private fun DownloadPanel(
             }
         },
         confirmButton = {
-            if (!state.running) {
-                TextButton(onClick = onDismiss) {
-                    Text("关闭")
-                }
+            TextButton(onClick = onDismiss) {
+                Text(if (state.running) "后台运行" else "关闭")
             }
         },
     )
@@ -2498,6 +2850,7 @@ private const val GITHUB_CLIENT_ID = "github_client_id"
 private const val DOWNLOAD_TREE_URI = "download_tree_uri"
 private const val ROOT_CLEANUP_ENABLED = "root_cleanup_enabled"
 private const val LAYOUT_MODE = "layout_mode"
+private const val DOWNLOAD_STATE_JSON = "download_state_json"
 private const val TOKEN_KEY_ALIAS = "YagaYHubGitHubToken"
 
 private fun getPackageInfoCompat(pm: PackageManager, packageName: String): PackageInfo? = runCatching {
