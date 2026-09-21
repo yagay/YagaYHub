@@ -20,10 +20,14 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.widget.Toast
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.KeyStore
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -130,20 +134,23 @@ private data class HubApp(
     val name: String,
     val packageName: String,
     val repo: String?,
+    val repoOwner: String = "yagay",
     val description: String,
     val installed: Boolean,
     val versionName: String?,
     val launchIntent: Intent?,
     val icon: Drawable?,
     val autoDiscovered: Boolean = false,
+    val repoOnly: Boolean = false,
     val actionsStatus: ActionsStatus = ActionsStatus.NONE,
     val latestRunId: Long? = null,
+    val latestActionTime: String? = null,
     val latestArtifactId: Long? = null,
     val latestArtifactSizeBytes: Long? = null,
 )
 
 private enum class AppFilter(val label: String) {
-    ALL("全部"), INSTALLED("已安装"), NOT_INSTALLED("未安装")
+    ALL("全部"), INSTALLED("已安装"), NOT_INSTALLED("未安装"), GITHUB("GitHub")
 }
 
 private val knownProjects = listOf(
@@ -174,9 +181,15 @@ private fun HubScreen(context: Context) {
 
     LaunchedEffect(refreshKey, githubToken) {
         val loadedApps = loadHubApps(context)
-        apps = loadedApps
+        val mergedApps = withContext(Dispatchers.IO) {
+            mergeGithubRepositories(
+                apps = loadedApps,
+                repositories = fetchOwnedRepositories(githubToken),
+            )
+        }
+        apps = mergedApps
         apps = withContext(Dispatchers.IO) {
-            loadActionsStatuses(loadedApps, githubToken)
+            loadActionsStatuses(mergedApps, githubToken)
         }
     }
 
@@ -186,7 +199,8 @@ private fun HubScreen(context: Context) {
             val filterOk = when (filter) {
                 AppFilter.ALL -> true
                 AppFilter.INSTALLED -> app.installed
-                AppFilter.NOT_INSTALLED -> !app.installed
+                AppFilter.NOT_INSTALLED -> !app.installed && !app.repoOnly
+                AppFilter.GITHUB -> app.repo != null
             }
             val queryOk = q.isBlank() ||
                 app.name.lowercase().contains(q) ||
@@ -251,7 +265,8 @@ private fun HubScreen(context: Context) {
                     val count = when (item) {
                         AppFilter.ALL -> apps.size
                         AppFilter.INSTALLED -> apps.count { it.installed }
-                        AppFilter.NOT_INSTALLED -> apps.count { !it.installed }
+                        AppFilter.NOT_INSTALLED -> apps.count { !it.installed && !it.repoOnly }
+                        AppFilter.GITHUB -> apps.count { it.repo != null }
                     }
                     FilterChip(
                         selected = filter == item,
@@ -282,7 +297,10 @@ private fun HubScreen(context: Context) {
                                 onClick = {
                                     when {
                                         app.launchIntent != null -> openApp(context, app)
-                                        app.repo != null -> openUrl(context, "https://github.com/yagay/${app.repo}")
+                                        app.repo != null -> openUrl(
+                                            context,
+                                            "https://github.com/" + app.repoOwner + "/" + app.repo
+                                        )
                                         app.installed -> openAppDetails(context, app.packageName)
                                     }
                                 },
@@ -294,7 +312,10 @@ private fun HubScreen(context: Context) {
                                 },
                                 onActionsClick = {
                                     app.repo?.let { repo ->
-                                        openUrl(context, "https://github.com/yagay/$repo/actions")
+                                        openUrl(
+                                            context,
+                                            "https://github.com/" + app.repoOwner + "/" + repo + "/actions"
+                                        )
                                     }
                                 },
                                 onArtifactClick = {
@@ -325,6 +346,7 @@ private fun HubScreen(context: Context) {
                                                 val result = withContext(Dispatchers.IO) {
                                                     downloadArtifactZip(
                                                         context = context,
+                                                        owner = app.repoOwner,
                                                         repo = repo,
                                                         runId = runId,
                                                         artifactId = artifactId,
@@ -449,6 +471,7 @@ private fun AppEntry(
                     .clip(CircleShape)
                     .background(
                         when {
+                            app.repoOnly -> MaterialTheme.colorScheme.secondary
                             !app.installed -> MaterialTheme.colorScheme.outline
                             app.launchIntent == null -> MaterialTheme.colorScheme.tertiary
                             else -> MaterialTheme.colorScheme.primary
@@ -469,6 +492,7 @@ private fun AppEntry(
         )
         Text(
             when {
+                app.repoOnly -> "GitHub 项目"
                 !app.installed -> "未安装"
                 app.launchIntent == null -> "模块"
                 app.versionName.isNullOrBlank() -> "已安装"
@@ -555,6 +579,14 @@ private fun AppEntry(
                         )
                     }
                 }
+            }
+            app.latestActionTime?.let { actionTime ->
+                Text(
+                    actionTime,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
             }
         }
     }
@@ -653,9 +685,108 @@ private fun loadKnownApp(pm: PackageManager, spec: ProjectSpec): HubApp {
     )
 }
 
+private data class GithubRepository(
+    val owner: String,
+    val name: String,
+    val description: String?,
+    val isPrivate: Boolean,
+)
+
+private fun fetchOwnedRepositories(token: String): List<GithubRepository> {
+    val repositories = linkedMapOf<String, GithubRepository>()
+
+    fun loadPages(baseUrl: String, authToken: String) {
+        for (page in 1..10) {
+            var connection: HttpURLConnection? = null
+            try {
+                val separator = if ("?" in baseUrl) "&" else "?"
+                connection = githubGet(
+                    baseUrl + separator + "per_page=100&page=" + page,
+                    token = authToken,
+                )
+                if (connection.responseCode !in 200..299) break
+                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                val array = JSONArray(body)
+                if (array.length() == 0) break
+
+                for (index in 0 until array.length()) {
+                    val item = array.getJSONObject(index)
+                    val owner = item.optJSONObject("owner")?.optString("login").orEmpty()
+                    val name = item.optString("name")
+                    if (owner.isBlank() || name.isBlank()) continue
+                    val key = (owner + "/" + name).lowercase()
+                    repositories[key] = GithubRepository(
+                        owner = owner,
+                        name = name,
+                        description = item.optString("description")
+                            .takeIf { it.isNotBlank() && it != "null" },
+                        isPrivate = item.optBoolean("private", false),
+                    )
+                }
+
+                if (array.length() < 100) break
+            } catch (_: Exception) {
+                break
+            } finally {
+                connection?.disconnect()
+            }
+        }
+    }
+
+    loadPages("https://api.github.com/users/yagay/repos?sort=updated", "")
+
+    if (token.isNotBlank()) {
+        loadPages(
+            "https://api.github.com/user/repos?affiliation=owner&sort=updated",
+            token,
+        )
+    }
+
+    return repositories.values.toList()
+}
+
+private fun mergeGithubRepositories(
+    apps: List<HubApp>,
+    repositories: List<GithubRepository>,
+): List<HubApp> {
+    val result = apps.toMutableList()
+    val existingRepos = apps.mapNotNull { app ->
+        val repo = app.repo ?: return@mapNotNull null
+        (app.repoOwner + "/" + repo).lowercase()
+    }.toMutableSet()
+
+    repositories.forEach { repository ->
+        val key = (repository.owner + "/" + repository.name).lowercase()
+        if (key in existingRepos) return@forEach
+
+        result += HubApp(
+            name = repository.name,
+            packageName = "github:" + repository.owner + "/" + repository.name,
+            repo = repository.name,
+            repoOwner = repository.owner,
+            description = repository.description
+                ?: if (repository.isPrivate) "GitHub 私有项目" else "GitHub 项目",
+            installed = false,
+            versionName = null,
+            launchIntent = null,
+            icon = null,
+            repoOnly = true,
+            actionsStatus = ActionsStatus.LOADING,
+        )
+        existingRepos += key
+    }
+
+    return result.sortedWith(
+        compareByDescending<HubApp> { it.installed }
+            .thenBy { it.repoOnly }
+            .thenBy { it.name.lowercase() }
+    )
+}
+
 private data class LatestActionsInfo(
     val status: ActionsStatus,
     val runId: Long?,
+    val actionTime: String?,
     val artifactId: Long?,
     val artifactSizeBytes: Long?,
 )
@@ -669,10 +800,11 @@ private suspend fun loadActionsStatuses(
             if (app.repo == null) {
                 app
             } else {
-                val info = fetchLatestActionsInfo(app.repo, token)
+                val info = fetchLatestActionsInfo(app.repoOwner, app.repo, token)
                 app.copy(
                     actionsStatus = info.status,
                     latestRunId = info.runId,
+                    latestActionTime = info.actionTime,
                     latestArtifactId = info.artifactId,
                     latestArtifactSizeBytes = info.artifactSizeBytes,
                 )
@@ -681,30 +813,35 @@ private suspend fun loadActionsStatuses(
     }.awaitAll()
 }
 
-private fun fetchLatestActionsInfo(repo: String, token: String): LatestActionsInfo {
+private fun fetchLatestActionsInfo(owner: String, repo: String, token: String): LatestActionsInfo {
     var connection: HttpURLConnection? = null
     return try {
         connection = githubGet(
-            "https://api.github.com/repos/yagay/" + repo + "/actions/runs?per_page=1",
+            "https://api.github.com/repos/" + owner + "/" + repo + "/actions/runs?per_page=1",
             token = token,
         )
         if (connection.responseCode !in 200..299) {
-            return LatestActionsInfo(ActionsStatus.UNKNOWN, null, null, null)
+            return LatestActionsInfo(ActionsStatus.UNKNOWN, null, null, null, null)
         }
 
         val body = connection.inputStream.bufferedReader().use { it.readText() }
         val runs = JSONObject(body).optJSONArray("workflow_runs")
         if (runs == null || runs.length() == 0) {
-            return LatestActionsInfo(ActionsStatus.NONE, null, null, null)
+            return LatestActionsInfo(ActionsStatus.NONE, null, null, null, null)
         }
 
         val run = runs.getJSONObject(0)
         val status = mapActionsStatus(run)
         val runId = run.optLong("id").takeIf { it > 0L }
+        val actionTime = formatActionsTime(
+            run.optString("run_started_at").ifBlank {
+                run.optString("created_at").ifBlank { run.optString("updated_at") }
+            }
+        )
 
         // 只处理最新一次 Actions：只有最新一次成功，才继续请求 artifact。
         val artifactInfo = if (status == ActionsStatus.SUCCESS && runId != null) {
-            fetchLatestArtifactInfo(repo, runId, token)
+            fetchLatestArtifactInfo(owner, repo, runId, token)
         } else {
             null
         }
@@ -712,17 +849,19 @@ private fun fetchLatestActionsInfo(repo: String, token: String): LatestActionsIn
         LatestActionsInfo(
             status = status,
             runId = runId,
+            actionTime = actionTime,
             artifactId = artifactInfo?.first,
             artifactSizeBytes = artifactInfo?.second,
         )
     } catch (_: Exception) {
-        LatestActionsInfo(ActionsStatus.UNKNOWN, null, null, null)
+        LatestActionsInfo(ActionsStatus.UNKNOWN, null, null, null, null)
     } finally {
         connection?.disconnect()
     }
 }
 
 private fun fetchLatestArtifactInfo(
+    owner: String,
     repo: String,
     runId: Long,
     token: String,
@@ -730,7 +869,7 @@ private fun fetchLatestArtifactInfo(
     var connection: HttpURLConnection? = null
     return try {
         connection = githubGet(
-            "https://api.github.com/repos/yagay/" + repo +
+            "https://api.github.com/repos/" + owner + "/" + repo +
                 "/actions/runs/" + runId + "/artifacts?per_page=100",
             token = token,
         )
@@ -753,6 +892,18 @@ private fun fetchLatestArtifactInfo(
     } finally {
         connection?.disconnect()
     }
+}
+
+private val actionsTimeFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("MM-dd HH:mm")
+
+private fun formatActionsTime(value: String): String? {
+    if (value.isBlank()) return null
+    return runCatching {
+        Instant.parse(value)
+            .atZone(ZoneId.systemDefault())
+            .format(actionsTimeFormatter)
+    }.getOrNull()
 }
 
 private fun formatFileSize(bytes: Long): String {
@@ -803,6 +954,7 @@ private data class DownloadResult(
 
 private fun downloadArtifactZip(
     context: Context,
+    owner: String,
     repo: String,
     runId: Long,
     artifactId: Long,
@@ -814,7 +966,7 @@ private fun downloadArtifactZip(
 
     return try {
         apiConnection = githubGet(
-            url = "https://api.github.com/repos/yagay/" + repo +
+            url = "https://api.github.com/repos/" + owner + "/" + repo +
                 "/actions/artifacts/" + artifactId + "/zip",
             token = token,
             followRedirects = false,
