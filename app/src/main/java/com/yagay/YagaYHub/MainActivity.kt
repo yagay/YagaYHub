@@ -335,7 +335,7 @@ private fun HubScreen(context: Context) {
                         saveLayoutMode(context, layoutMode)
                     }
                 ) {
-                    Text(layoutMode.label)
+                    Text(if (layoutMode == LayoutMode.LIST) "网格" else "列表")
                 }
                 IconButton(onClick = { refreshKey++ }) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
@@ -796,6 +796,172 @@ private fun GithubDeviceAuthDialog(
             }
         },
     )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AppListEntry(
+    app: HubApp,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onActionsClick: () -> Unit,
+    onArtifactClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+        shape = RoundedCornerShape(14.dp),
+        tonalElevation = 1.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box {
+                AppIcon(app)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(13.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when {
+                                app.repoOnly -> MaterialTheme.colorScheme.secondary
+                                !app.installed -> MaterialTheme.colorScheme.outline
+                                app.launchIntent == null -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.primary
+                            }
+                        )
+                )
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    app.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    when {
+                        app.repoOnly -> "GitHub 项目"
+                        !app.installed -> "未安装"
+                        app.launchIntent == null && app.versionName.isNullOrBlank() -> "模块"
+                        app.versionName.isNullOrBlank() -> "已安装"
+                        app.launchIntent == null -> "模块 · " + app.versionName
+                        else -> "版本 " + app.versionName
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                app.installedUpdateTime?.let { updateTime ->
+                    Text(
+                        "本机更新  " + updateTime,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                    )
+                }
+                app.latestActionTime?.let { actionTime ->
+                    Text(
+                        "Actions   " + actionTime,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                    )
+                }
+            }
+
+            if (app.repo != null) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onActionsClick)
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.PlayArrow,
+                            contentDescription = "GitHub Actions",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when (app.actionsStatus) {
+                                        ActionsStatus.SUCCESS -> MaterialTheme.colorScheme.primary
+                                        ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
+                                        ActionsStatus.RUNNING -> MaterialTheme.colorScheme.tertiary
+                                        ActionsStatus.QUEUED -> MaterialTheme.colorScheme.secondary
+                                        ActionsStatus.CANCELLED -> MaterialTheme.colorScheme.outline
+                                        ActionsStatus.LOADING,
+                                        ActionsStatus.NONE,
+                                        ActionsStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                        )
+                        Text(
+                            app.actionsStatus.label,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (app.actionsStatus == ActionsStatus.FAILURE) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onArtifactClick)
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Download,
+                            contentDescription = "下载最新成功构建 ZIP",
+                            modifier = Modifier.size(17.dp),
+                            tint = if (app.latestArtifactId != null) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.outline
+                            },
+                        )
+                        Text(
+                            app.latestArtifactSizeBytes?.let(::formatFileSize) ?: "ZIP",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
