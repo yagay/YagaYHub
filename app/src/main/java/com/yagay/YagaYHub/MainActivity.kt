@@ -164,7 +164,13 @@ class MainActivity : ComponentActivity() {
         val title = intent.getStringExtra(EXTRA_CHAT_BIND_TITLE)
             .orEmpty()
             .ifBlank { "ChatGPT" }
-        if (repo.isBlank() || url.isBlank()) return
+        if (
+            repo.isBlank() ||
+            url.isBlank() ||
+            !isBindableChatGptUrl(url)
+        ) {
+            return
+        }
 
         saveChatBinding(
             context = this,
@@ -3516,6 +3522,20 @@ private fun openAppDetails(context: Context, packageName: String) {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     runCatching { context.startActivity(intent) }
+}
+
+private fun isBindableChatGptUrl(url: String): Boolean {
+    val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+    val host = uri.host
+        ?.lowercase()
+        ?.removePrefix("www.")
+        ?: return false
+    if (host != "chatgpt.com" && host != "chat.openai.com") return false
+    val path = uri.path.orEmpty()
+    if (path.startsWith("/share/")) return false
+    return path.startsWith("/c/") ||
+        path.contains("/c/") ||
+        path.startsWith("/g/")
 }
 
 private fun normalizedRepoKey(repoKey: String): String =
