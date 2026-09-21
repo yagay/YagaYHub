@@ -85,7 +85,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
@@ -709,8 +708,9 @@ private fun HubScreen(
                     },
                 ) {
                     Icon(
-                        Icons.Outlined.AutoAwesome,
+                        painter = painterResource(R.drawable.ic_chatgpt),
                         contentDescription = "ChatGPT",
+                        modifier = Modifier.size(24.dp),
                     )
                 }
                 if (downloadUiState != null) {
