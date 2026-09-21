@@ -85,6 +85,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
@@ -686,8 +687,31 @@ private fun HubScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                TextButton(onClick = { openUrl(context, "https://www.google.com/") }) {
-                    Text("浏览器")
+                IconButton(
+                    onClick = {
+                        val bindings = loadAllChatBindings(context)
+                        val target = bindings.firstOrNull()
+                        if (target == null) {
+                            Toast.makeText(
+                                context,
+                                "还没有绑定 ChatGPT 页面，请先在项目中点击“绑定”",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        } else {
+                            openChatPopup(
+                                context = context,
+                                url = target.url,
+                                bindingRepoKey = target.repoKey,
+                                bindingProject = projectNameForBinding(target),
+                                bindingTitle = target.title,
+                            )
+                        }
+                    },
+                ) {
+                    Icon(
+                        Icons.Outlined.AutoAwesome,
+                        contentDescription = "ChatGPT",
+                    )
                 }
                 if (downloadUiState != null) {
                     TextButton(onClick = { showDownloadPanel = true }) {
@@ -754,20 +778,21 @@ private fun HubScreen(
                 }
             } else {
                 val itemContent: @Composable (HubApp) -> Unit = { app ->
-                    val chatBinding = remember(
+                    val chatBindings = remember(
                         chatBindingRevision,
                         bindingUiRevision,
                         app.repoOwner,
                         app.repo,
                     ) {
                         app.repo?.let { repo ->
-                            loadChatBinding(
+                            loadChatBindings(
                                 context = context,
                                 owner = app.repoOwner,
                                 repo = repo,
                             )
-                        }
+                        }.orEmpty()
                     }
+                    val chatBinding = chatBindings.firstOrNull()
 
                     val onClick: () -> Unit = {
                         when {
@@ -855,25 +880,19 @@ private fun HubScreen(
                         }
                     }
                     val onChatClick: () -> Unit = {
-                        val repo = app.repo
-                        if (repo != null) {
-                            val bindings = loadChatBindings(
-                                context = context,
-                                owner = app.repoOwner,
-                                repo = repo,
-                            )
-                            if (bindings.isEmpty()) {
-                                startChatGptBinding(
-                                    context = context,
-                                    app = app,
-                                    currentBinding = null,
-                                )
+                        if (app.repo != null) {
+                            if (chatBindings.isEmpty()) {
+                                Toast.makeText(
+                                    context,
+                                    "当前项目还没有绑定页面，请点击“绑定”添加",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
                             } else {
                                 bindingListApp = app
                             }
                         }
                     }
-                    val onChatLongClick: () -> Unit = {
+                    val onBindClick: () -> Unit = {
                         if (app.repo != null) {
                             startChatGptBinding(
                                 context = context,
@@ -891,8 +910,9 @@ private fun HubScreen(
                             onActionsClick = onActionsClick,
                             onArtifactClick = onArtifactClick,
                             chatBinding = chatBinding,
+                            chatBindingCount = chatBindings.size,
                             onChatClick = onChatClick,
-                            onChatLongClick = onChatLongClick,
+                            onBindClick = onBindClick,
                         )
                     } else {
                         AppEntry(
