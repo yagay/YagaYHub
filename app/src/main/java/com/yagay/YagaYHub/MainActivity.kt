@@ -78,6 +78,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -180,6 +181,17 @@ private enum class LayoutMode(val label: String) {
     GRID("网格"),
 }
 
+private data class DownloadUiState(
+    val appName: String,
+    val stage: String = "准备下载",
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long? = null,
+    val running: Boolean = true,
+    val message: String? = null,
+    val apks: List<ExtractedApk> = emptyList(),
+)
+
+
 
 private val knownProjects = listOf(
     ProjectSpec("FloatLens", "com.yagay.floatlens", "FloatLens", "悬浮识别、截图与屏幕工具"),
@@ -214,6 +226,8 @@ private fun HubScreen(context: Context) {
     var rootStatus by remember { mutableStateOf(RootStatus.NOT_CHECKED) }
     var layoutMode by remember { mutableStateOf(loadLayoutMode(context)) }
     var pendingInstallApk by remember { mutableStateOf<ExtractedApk?>(null) }
+    var downloadUiState by remember { mutableStateOf<DownloadUiState?>(null) }
+    var showDownloadPanel by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val directoryPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -320,6 +334,11 @@ private fun HubScreen(context: Context) {
                 }
                 TextButton(onClick = { openUrl(context, "https://www.google.com/") }) {
                     Text("浏览器")
+                }
+                if (downloadUiState != null) {
+                    TextButton(onClick = { showDownloadPanel = true }) {
+                        Text("下载")
+                    }
                 }
                 TextButton(onClick = { showSettings = true }) {
                     Text("设置")
@@ -430,12 +449,12 @@ private fun HubScreen(context: Context) {
                                 showSettings = true
                             }
                             else -> {
+                                downloadUiState = DownloadUiState(
+                                    appName = app.name,
+                                    totalBytes = app.latestArtifactSizeBytes,
+                                )
+                                showDownloadPanel = true
                                 scope.launch {
-                                    Toast.makeText(
-                                        context,
-                                        "开始下载 " + app.name + "…",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
                                     val result = withContext(Dispatchers.IO) {
                                         downloadArtifactZip(
                                             context = context,
@@ -447,15 +466,35 @@ private fun HubScreen(context: Context) {
                                             destinationTreeUri = downloadTreeUri,
                                             rootEnhancedCleanup = rootCleanupEnabled &&
                                                 rootStatus == RootStatus.AVAILABLE,
+                                            expectedSizeBytes = app.latestArtifactSizeBytes,
+                                            onProgress = { downloaded, total, stage ->
+                                                context.mainExecutor.execute {
+                                                    val current = downloadUiState
+                                                    if (current != null && current.appName == app.name) {
+                                                        downloadUiState = current.copy(
+                                                            stage = stage,
+                                                            downloadedBytes = downloaded,
+                                                            totalBytes = total ?: current.totalBytes,
+                                                        )
+                                                    }
+                                                }
+                                            },
                                         )
                                     }
-                                    Toast.makeText(
-                                        context,
-                                        result.message,
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                    if (result.success && result.extractedApks.isNotEmpty()) {
-                                        val primaryApk = choosePrimaryApk(result.extractedApks)
+
+                                    downloadUiState = DownloadUiState(
+                                        appName = app.name,
+                                        stage = if (result.success) "完成" else "失败",
+                                        downloadedBytes = downloadUiState?.downloadedBytes ?: 0L,
+                                        totalBytes = downloadUiState?.totalBytes,
+                                        running = false,
+                                        message = result.message,
+                                        apks = result.extractedApks,
+                                    )
+                                    showDownloadPanel = true
+
+                                    if (result.success && result.extractedApks.size == 1) {
+                                        val primaryApk = result.extractedApks.first()
                                         if (
                                             Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
                                             !context.packageManager.canRequestPackageInstalls()
@@ -526,6 +565,29 @@ private fun HubScreen(context: Context) {
                 }
             }
         }
+    }
+
+    if (showDownloadPanel && downloadUiState != null) {
+        DownloadPanel(
+            state = downloadUiState!!,
+            onDismiss = { showDownloadPanel = false },
+            onInstall = { apk ->
+                if (
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                    !context.packageManager.canRequestPackageInstalls()
+                ) {
+                    pendingInstallApk = apk
+                    unknownSourcesLauncher.launch(
+                        Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:" + context.packageName),
+                        )
+                    )
+                } else {
+                    openExtractedApk(context, apk)
+                }
+            },
+        )
     }
 
     if (showSettings) {
@@ -748,6 +810,123 @@ private fun GitHubSettingsDialog(
                         Text("清除 Token")
                     }
                 }
+                TextButton(onClick = onDismiss) {
+                    Text("关闭")
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun DownloadPanel(
+    state: DownloadUiState,
+    onDismiss: () -> Unit,
+    onInstall: (ExtractedApk) -> Unit,
+) {
+    val total = state.totalBytes?.takeIf { it > 0L }
+    val progress = if (total != null) {
+        (state.downloadedBytes.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+    } else {
+        null
+    }
+
+    AlertDialog(
+        onDismissRequest = {
+            if (!state.running) onDismiss()
+        },
+        title = { Text("下载 · " + state.appName) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    state.stage,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                )
+
+                if (state.running) {
+                    if (progress != null) {
+                        LinearProgressIndicator(
+                            progress = progress,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            (progress * 100).toInt().toString() + "% · " +
+                                formatFileSize(state.downloadedBytes) + " / " +
+                                formatFileSize(total),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Text(
+                            formatFileSize(state.downloadedBytes),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                state.message?.let { message ->
+                    Text(
+                        message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                if (state.apks.isNotEmpty()) {
+                    Text(
+                        "APK 选择列表",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    state.apks.forEach { apk ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onInstall(apk) },
+                            shape = RoundedCornerShape(10.dp),
+                            tonalElevation = 1.dp,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        apk.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (apk == choosePrimaryApk(state.apks)) {
+                                        Text(
+                                            "推荐主 APK",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+                                Text(
+                                    "安装",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                } else if (!state.running && state.message != null) {
+                    Text(
+                        "没有可安装的 APK",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (!state.running) {
                 TextButton(onClick = onDismiss) {
                     Text("关闭")
                 }
@@ -1538,12 +1717,15 @@ private fun downloadArtifactZip(
     token: String,
     destinationTreeUri: String,
     rootEnhancedCleanup: Boolean,
+    expectedSizeBytes: Long? = null,
+    onProgress: (Long, Long?, String) -> Unit = { _, _, _ -> },
 ): DownloadResult {
     var apiConnection: HttpURLConnection? = null
     var downloadConnection: HttpURLConnection? = null
     var outputUri: Uri? = null
 
     return try {
+        onProgress(0L, expectedSizeBytes, "连接 GitHub…")
         apiConnection = githubGet(
             url = "https://api.github.com/repos/" + owner + "/" + repo +
                 "/actions/artifacts/" + artifactId + "/zip",
@@ -1607,13 +1789,32 @@ private fun downloadArtifactZip(
         } ?: return DownloadResult(false, "无法创建下载文件")
 
         outputUri = destination.uri
+        val totalBytes = streamConnection.contentLengthLong
+            .takeIf { it > 0L }
+            ?: expectedSizeBytes
+        var copiedBytes = 0L
+        var lastProgressUpdate = 0L
         context.contentResolver.openOutputStream(destination.uri, "w")?.use { output ->
             streamConnection.inputStream.use { input ->
-                input.copyTo(output)
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    output.write(buffer, 0, read)
+                    copiedBytes += read
+                    val now = System.currentTimeMillis()
+                    if (now - lastProgressUpdate >= 120L) {
+                        onProgress(copiedBytes, totalBytes, "下载 ZIP…")
+                        lastProgressUpdate = now
+                    }
+                }
+                output.flush()
             }
         } ?: return DownloadResult(false, "无法写入下载文件")
+        onProgress(copiedBytes, totalBytes, "ZIP 下载完成")
 
         destination.finish?.invoke()
+        onProgress(copiedBytes, totalBytes, "解压 APK…")
 
         val extractedApks = extractApksFromZip(
             context = context,
@@ -1623,6 +1824,7 @@ private fun downloadArtifactZip(
         )
 
         if (rootCleanupApplied && rootDirectory != null) {
+            onProgress(copiedBytes, totalBytes, "Root 清理…")
             rootCleanupDownloadDirectory(
                 context = context,
                 directory = rootDirectory,
@@ -1631,6 +1833,7 @@ private fun downloadArtifactZip(
             )
         }
 
+        onProgress(copiedBytes, totalBytes, "完成")
         DownloadResult(
             success = true,
             message = buildString {
