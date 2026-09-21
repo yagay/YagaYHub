@@ -103,6 +103,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -528,6 +529,7 @@ private fun HubScreen(
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(AppFilter.INSTALLED) }
     var refreshKey by remember { mutableStateOf(0) }
+    var isRefreshing by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var githubToken by remember { mutableStateOf(loadGithubToken(context)) }
     var githubClientId by remember {
@@ -654,16 +656,27 @@ private fun HubScreen(
     }
 
     LaunchedEffect(refreshKey, githubToken) {
-        val loadedApps = loadHubApps(context)
-        val mergedApps = withContext(Dispatchers.IO) {
-            mergeGithubRepositories(
-                apps = loadedApps,
-                repositories = fetchOwnedRepositories(githubToken),
-            )
+        try {
+            val loadedApps = loadHubApps(context)
+            val mergedApps = withContext(Dispatchers.IO) {
+                mergeGithubRepositories(
+                    apps = loadedApps,
+                    repositories = fetchOwnedRepositories(githubToken),
+                )
+            }
+            apps = mergedApps
+            apps = withContext(Dispatchers.IO) {
+                loadActionsStatuses(mergedApps, githubToken)
+            }
+        } finally {
+            isRefreshing = false
         }
-        apps = mergedApps
-        apps = withContext(Dispatchers.IO) {
-            loadActionsStatuses(mergedApps, githubToken)
+    }
+
+    val requestRefresh: () -> Unit = {
+        if (!isRefreshing) {
+            isRefreshing = true
+            refreshKey++
         }
     }
 
@@ -843,7 +856,10 @@ private fun HubScreen(
                 ) {
                     Text(if (layoutMode == LayoutMode.LIST) "网格" else "列表")
                 }
-                IconButton(onClick = { refreshKey++ }) {
+                IconButton(
+                    onClick = requestRefresh,
+                    enabled = !isRefreshing,
+                ) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
                 }
             }
@@ -882,12 +898,32 @@ private fun HubScreen(
             }
 
             Spacer(Modifier.height(4.dp))
-            if (visibleApps.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("没有匹配的 App", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                val itemContent: @Composable (HubApp) -> Unit = { app ->
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = requestRefresh,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                if (visibleApps.isEmpty()) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
+                    ) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(240.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "没有匹配的 App",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    val itemContent: @Composable (HubApp) -> Unit = { app ->
                     val chatBindings = remember(
                         chatBindingRevision,
                         bindingUiRevision,
