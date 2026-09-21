@@ -127,6 +127,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -530,6 +533,8 @@ private fun HubScreen(
     var filter by remember { mutableStateOf(AppFilter.INSTALLED) }
     var refreshKey by remember { mutableStateOf(0) }
     var isRefreshing by remember { mutableStateOf(false) }
+    var isAutoRefreshing by remember { mutableStateOf(false) }
+    var autoRefreshCursor by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
     var githubToken by remember { mutableStateOf(loadGithubToken(context)) }
     var githubClientId by remember {
@@ -567,6 +572,7 @@ private fun HubScreen(
     var pendingDownloadRequest by remember { mutableStateOf<ArtifactDownloadRequest?>(null) }
     var bindingListApp by remember { mutableStateOf<HubApp?>(null) }
     var bindingUiRevision by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val directoryPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -674,9 +680,39 @@ private fun HubScreen(
     }
 
     val requestRefresh: () -> Unit = {
-        if (!isRefreshing) {
+        if (!isRefreshing && !isAutoRefreshing) {
             isRefreshing = true
             refreshKey++
+        }
+    }
+
+    LaunchedEffect(githubToken, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                delay(
+                    if (githubToken.isNotBlank()) {
+                        AUTO_REFRESH_INTERVAL_AUTH_MS
+                    } else {
+                        AUTO_REFRESH_INTERVAL_ANON_MS
+                    }
+                )
+                if (isRefreshing || isAutoRefreshing || apps.isEmpty()) continue
+
+                isAutoRefreshing = true
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        refreshDynamicGithubState(
+                            apps = apps,
+                            token = githubToken,
+                            stableCursor = autoRefreshCursor,
+                        )
+                    }
+                    apps = result.apps
+                    autoRefreshCursor = result.nextStableCursor
+                } finally {
+                    isAutoRefreshing = false
+                }
+            }
         }
     }
 
@@ -858,7 +894,7 @@ private fun HubScreen(
                 }
                 IconButton(
                     onClick = requestRefresh,
-                    enabled = !isRefreshing,
+                    enabled = !isRefreshing && !isAutoRefreshing,
                 ) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
                 }
@@ -2741,13 +2777,13 @@ private fun fetchOwnedRepositories(token: String): List<GithubRepository> {
         }
     }
 
-    loadPages("https://api.github.com/users/yagay/repos?sort=updated", "")
-
     if (token.isNotBlank()) {
         loadPages(
             "https://api.github.com/user/repos?affiliation=owner&sort=updated",
             token,
         )
+    } else {
+        loadPages("https://api.github.com/users/yagay/repos?sort=updated", "")
     }
 
     return repositories.values.toList()
@@ -2756,6 +2792,7 @@ private fun fetchOwnedRepositories(token: String): List<GithubRepository> {
 private fun mergeGithubRepositories(
     apps: List<HubApp>,
     repositories: List<GithubRepository>,
+    resetActionsStatus: Boolean = true,
 ): List<HubApp> {
     val result = apps.toMutableList()
     val existingRepos = apps.mapNotNull { app ->
@@ -2776,7 +2813,11 @@ private fun mergeGithubRepositories(
                 description = repository.description ?: app.description,
                 repoUpdatedTime = repository.updatedTime,
                 repoPushedTime = repository.pushedTime,
-                actionsStatus = ActionsStatus.LOADING,
+                actionsStatus = if (resetActionsStatus) {
+                    ActionsStatus.LOADING
+                } else {
+                    app.actionsStatus
+                },
             )
             existingRepos += key
             return@forEach
@@ -2828,6 +2869,127 @@ private fun mergeGithubRepositories(
     )
 }
 
+private data class DynamicGithubRefreshResult(
+    val apps: List<HubApp>,
+    val nextStableCursor: Int,
+)
+
+private suspend fun refreshDynamicGithubState(
+    apps: List<HubApp>,
+    token: String,
+    stableCursor: Int,
+): DynamicGithubRefreshResult {
+    val repositories = fetchOwnedRepositories(token)
+    val merged = mergeGithubRepositories(
+        apps = apps,
+        repositories = repositories,
+        resetActionsStatus = false,
+    )
+
+    fun repoKey(app: HubApp): String? {
+        val repo = app.repo ?: return null
+        return (app.repoOwner + "/" + repo).lowercase()
+    }
+
+    val previousByRepo = apps
+        .mapNotNull { app -> repoKey(app)?.let { it to app } }
+        .toMap()
+
+    val changedRepoKeys = merged.mapNotNull { app ->
+        val key = repoKey(app) ?: return@mapNotNull null
+        val previous = previousByRepo[key]
+        if (
+            previous == null ||
+            previous.repoUpdatedTime != app.repoUpdatedTime ||
+            previous.repoPushedTime != app.repoPushedTime
+        ) {
+            key
+        } else {
+            null
+        }
+    }.toSet()
+
+    val activeRepoKeys = merged.mapNotNull { app ->
+        val key = repoKey(app) ?: return@mapNotNull null
+        if (
+            app.actionsStatus == ActionsStatus.LOADING ||
+            app.actionsStatus == ActionsStatus.RUNNING ||
+            app.actionsStatus == ActionsStatus.QUEUED
+        ) {
+            key
+        } else {
+            null
+        }
+    }.toSet()
+
+    val stableRepos = merged
+        .mapNotNull { app ->
+            val key = repoKey(app) ?: return@mapNotNull null
+            if (key in changedRepoKeys || key in activeRepoKeys) null else key
+        }
+        .distinct()
+
+    val stableBatchSize = if (token.isNotBlank()) AUTO_ACTIONS_BATCH_SIZE else 0
+    val stableBatch = if (stableRepos.isNotEmpty() && stableBatchSize > 0) {
+        buildSet {
+            repeat(minOf(stableBatchSize, stableRepos.size)) { offset ->
+                add(stableRepos[(stableCursor + offset) % stableRepos.size])
+            }
+        }
+    } else {
+        emptySet()
+    }
+
+    val selectedRepoKeys = changedRepoKeys + activeRepoKeys + stableBatch
+
+    val refreshed = coroutineScope {
+        merged.map { app ->
+            async {
+                val key = repoKey(app)
+                if (key == null || key !in selectedRepoKeys) {
+                    app
+                } else {
+                    val repo = app.repo ?: return@async app
+                    val info = fetchLatestActionsInfo(
+                        owner = app.repoOwner,
+                        repo = repo,
+                        token = token,
+                        knownRunId = app.latestRunId,
+                        knownArtifactId = app.latestArtifactId,
+                        knownArtifactSizeBytes = app.latestArtifactSizeBytes,
+                    )
+                    if (
+                        info.status == ActionsStatus.UNKNOWN &&
+                        app.actionsStatus != ActionsStatus.LOADING &&
+                        app.actionsStatus != ActionsStatus.UNKNOWN
+                    ) {
+                        app
+                    } else {
+                        app.copy(
+                            actionsStatus = info.status,
+                            latestRunId = info.runId,
+                            latestActionTime = info.actionTime,
+                            latestArtifactId = info.artifactId,
+                            latestArtifactSizeBytes = info.artifactSizeBytes,
+                        )
+                    }
+                }
+            }
+        }.awaitAll()
+    }
+
+    val nextCursor = if (stableRepos.isEmpty() || stableBatchSize == 0) {
+        0
+    } else {
+        (stableCursor + minOf(stableBatchSize, stableRepos.size)) % stableRepos.size
+    }
+
+    return DynamicGithubRefreshResult(
+        apps = refreshed,
+        nextStableCursor = nextCursor,
+    )
+}
+
 private data class LatestActionsInfo(
     val status: ActionsStatus,
     val runId: Long?,
@@ -2849,7 +3011,14 @@ private suspend fun loadActionsStatuses(
                     app
                 }
             } else {
-                val info = fetchLatestActionsInfo(app.repoOwner, app.repo, token)
+                val info = fetchLatestActionsInfo(
+                    owner = app.repoOwner,
+                    repo = app.repo,
+                    token = token,
+                    knownRunId = app.latestRunId,
+                    knownArtifactId = app.latestArtifactId,
+                    knownArtifactSizeBytes = app.latestArtifactSizeBytes,
+                )
                 app.copy(
                     actionsStatus = info.status,
                     latestRunId = info.runId,
@@ -2862,7 +3031,14 @@ private suspend fun loadActionsStatuses(
     }.awaitAll()
 }
 
-private fun fetchLatestActionsInfo(owner: String, repo: String, token: String): LatestActionsInfo {
+private fun fetchLatestActionsInfo(
+    owner: String,
+    repo: String,
+    token: String,
+    knownRunId: Long? = null,
+    knownArtifactId: Long? = null,
+    knownArtifactSizeBytes: Long? = null,
+): LatestActionsInfo {
     var connection: HttpURLConnection? = null
     return try {
         connection = githubGet(
@@ -2888,9 +3064,13 @@ private fun fetchLatestActionsInfo(owner: String, repo: String, token: String): 
             }
         )
 
-        // 只处理最新一次 Actions：只有最新一次成功，才继续请求 artifact。
+        // 同一个成功 run 已有 artifact 时直接复用，避免自动刷新重复请求产物接口。
         val artifactInfo = if (status == ActionsStatus.SUCCESS && runId != null) {
-            fetchLatestArtifactInfo(owner, repo, runId, token)
+            if (runId == knownRunId && knownArtifactId != null) {
+                knownArtifactId to (knownArtifactSizeBytes ?: 0L)
+            } else {
+                fetchLatestArtifactInfo(owner, repo, runId, token)
+            }
         } else {
             null
         }
@@ -4209,6 +4389,10 @@ private const val EXTRA_STATE_RUNNING = "state_running"
 private const val EXTRA_STATE_MESSAGE = "state_message"
 private const val EXTRA_STATE_APK_NAMES = "state_apk_names"
 private const val EXTRA_STATE_APK_URIS = "state_apk_uris"
+
+private const val AUTO_REFRESH_INTERVAL_AUTH_MS = 20_000L
+private const val AUTO_REFRESH_INTERVAL_ANON_MS = 90_000L
+private const val AUTO_ACTIONS_BATCH_SIZE = 5
 
 private const val TOKEN_PREFS = "github_secure"
 private const val TOKEN_IV = "token_iv"
