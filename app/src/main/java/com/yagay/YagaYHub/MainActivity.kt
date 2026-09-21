@@ -151,24 +151,26 @@ class MainActivity : ComponentActivity() {
                             quickChatBindingRequest = null
                         },
                         onQuickChatBindingSelected = { app ->
-                            val repo = app.repo ?: return@HubScreen
-                            val request = quickChatBindingRequest ?: return@HubScreen
-                            val repoKey = app.repoOwner + "/" + repo
-                            saveChatBinding(
-                                context = this,
-                                repoKey = repoKey,
-                                title = request.title,
-                                url = request.url,
-                            )
-                            chatBindingRevision++
-                            quickChatBindingRequest = null
-                            syncChatBindingToYBrowser(
-                                context = this,
-                                repoKey = repoKey,
-                                project = app.name,
-                                url = request.url,
-                                title = request.title,
-                            )
+                            val repo = app.repo
+                            val request = quickChatBindingRequest
+                            if (repo != null && request != null) {
+                                val repoKey = app.repoOwner + "/" + repo
+                                saveChatBinding(
+                                    context = this,
+                                    repoKey = repoKey,
+                                    title = request.title,
+                                    url = request.url,
+                                )
+                                chatBindingRevision++
+                                quickChatBindingRequest = null
+                                syncChatBindingToYBrowser(
+                                    context = this,
+                                    repoKey = repoKey,
+                                    project = app.name,
+                                    url = request.url,
+                                    title = request.title,
+                                )
+                            }
                         },
                     )
                 }
@@ -229,6 +231,15 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+}
+
+class ChatBindingCommandReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent?) {
+        if (intent?.action != ACTION_REMOVE_CHATGPT_BINDING) return
+        val repoKey = intent.getStringExtra(EXTRA_CHAT_BIND_REPO).orEmpty()
+        if (repoKey.isBlank()) return
+        removeChatBinding(context, repoKey)
     }
 }
 
@@ -893,6 +904,99 @@ private fun HubScreen(
                 }
             }
         }
+    }
+
+    if (quickChatBindingRequest != null) {
+        val request = quickChatBindingRequest
+        val bindingApps = apps
+            .filter { it.repo != null }
+            .distinctBy { (it.repoOwner + "/" + it.repo).lowercase() }
+
+        AlertDialog(
+            onDismissRequest = onQuickChatBindingDismiss,
+            title = { Text("绑定当前 ChatGPT") },
+            text = {
+                Column {
+                    Text(
+                        request.title,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (bindingApps.isEmpty()) {
+                        Text("正在读取项目…")
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.height(360.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            lazyItems(
+                                items = bindingApps,
+                                key = { it.repoOwner + "/" + it.repo },
+                            ) { app ->
+                                val repo = app.repo ?: return@lazyItems
+                                val existing = loadChatBinding(
+                                    context = context,
+                                    owner = app.repoOwner,
+                                    repo = repo,
+                                )
+                                val selected = existing?.url
+                                    ?.let { sameChatBindingUrl(it, request.url) } == true
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onQuickChatBindingSelected(app)
+                                        },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceContainer
+                                    },
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                app.name,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                app.repoOwner + "/" + repo,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                            )
+                                        }
+                                        if (selected) {
+                                            Text(
+                                                "当前已绑定",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = onQuickChatBindingDismiss) {
+                    Text("取消")
+                }
+            },
+        )
     }
 
     if (showDownloadPanel && downloadUiState != null) {
@@ -3502,6 +3606,12 @@ private fun loadLayoutMode(context: Context): LayoutMode {
 
 private const val ACTION_CHATGPT_BOUND =
     "com.yagay.YagaYHub.action.CHATGPT_BOUND"
+private const val ACTION_REQUEST_CHATGPT_BINDING =
+    "com.yagay.YagaYHub.action.REQUEST_CHATGPT_BINDING"
+private const val ACTION_REMOVE_CHATGPT_BINDING =
+    "com.yagay.YagaYHub.action.REMOVE_CHATGPT_BINDING"
+private const val YBROWSER_CHAT_BINDING_SYNC_ACTION =
+    "com.yagay.YBrowser.action.CHATGPT_BINDING_SYNC"
 private const val YBROWSER_SELECT_CHAT_ACTION =
     "com.yagay.YBrowser.action.SELECT_CHATGPT_CHAT"
 private const val EXTRA_CHAT_BIND_REPO = "com.yagay.YBrowser.extra.BIND_REPO"
@@ -3603,13 +3713,53 @@ private fun saveChatBinding(
     url: String,
 ) {
     val key = normalizedRepoKey(repoKey)
-    if (key.isBlank()) return
-    context.getSharedPreferences(CHAT_BINDINGS_PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .putString(key + ":url", url)
+    val normalizedUrl = normalizeChatBindingUrl(url)
+    if (key.isBlank() || normalizedUrl.isBlank()) return
+
+    val prefs = context.getSharedPreferences(
+        CHAT_BINDINGS_PREFS,
+        Context.MODE_PRIVATE,
+    )
+    val editor = prefs.edit()
+
+    prefs.all.forEach { (prefKey, value) ->
+        if (
+            prefKey.endsWith(":url") &&
+            value is String &&
+            sameChatBindingUrl(value, normalizedUrl)
+        ) {
+            val otherKey = prefKey.removeSuffix(":url")
+            if (otherKey != key) {
+                editor.remove(otherKey + ":url")
+                editor.remove(otherKey + ":title")
+            }
+        }
+    }
+
+    editor
+        .putString(key + ":url", normalizedUrl)
         .putString(key + ":title", title.ifBlank { "ChatGPT" })
         .apply()
 }
+
+private fun removeChatBinding(
+    context: Context,
+    repoKey: String,
+) {
+    val key = normalizedRepoKey(repoKey)
+    if (key.isBlank()) return
+    context.getSharedPreferences(CHAT_BINDINGS_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .remove(key + ":url")
+        .remove(key + ":title")
+        .apply()
+}
+
+private fun normalizeChatBindingUrl(url: String): String =
+    url.substringBefore('#').trim().trimEnd('/')
+
+private fun sameChatBindingUrl(left: String, right: String): Boolean =
+    normalizeChatBindingUrl(left) == normalizeChatBindingUrl(right)
 
 private fun loadChatBinding(
     context: Context,
@@ -3662,6 +3812,27 @@ private fun startChatGptBinding(
             Toast.LENGTH_SHORT,
         ).show()
     }
+}
+
+private fun syncChatBindingToYBrowser(
+    context: Context,
+    repoKey: String,
+    project: String,
+    url: String,
+    title: String,
+) {
+    val intent = Intent(YBROWSER_CHAT_BINDING_SYNC_ACTION).apply {
+        setPackage(YBROWSER_PACKAGE)
+        putExtra(EXTRA_CHAT_BIND_REPO, repoKey)
+        putExtra(EXTRA_CHAT_BIND_PROJECT, project)
+        putExtra(EXTRA_CHAT_BIND_URL, url)
+        putExtra(EXTRA_CHAT_BIND_TITLE, title)
+        addFlags(
+            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        )
+    }
+    runCatching { context.startActivity(intent) }
 }
 
 private fun openUrl(
