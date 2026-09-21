@@ -14,6 +14,9 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -40,6 +43,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.FilterChip
@@ -69,6 +73,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,6 +99,17 @@ private data class ProjectSpec(
     val description: String,
 )
 
+private enum class ActionsStatus(val label: String) {
+    LOADING("读取中"),
+    SUCCESS("成功"),
+    FAILURE("失败"),
+    RUNNING("运行中"),
+    QUEUED("排队中"),
+    CANCELLED("已取消"),
+    NONE("无记录"),
+    UNKNOWN("未知"),
+}
+
 private data class HubApp(
     val name: String,
     val packageName: String,
@@ -100,6 +120,7 @@ private data class HubApp(
     val launchIntent: Intent?,
     val icon: Drawable?,
     val autoDiscovered: Boolean = false,
+    val actionsStatus: ActionsStatus = ActionsStatus.NONE,
 )
 
 private enum class AppFilter(val label: String) {
@@ -130,7 +151,11 @@ private fun HubScreen(context: Context) {
     var refreshKey by remember { mutableStateOf(0) }
 
     LaunchedEffect(refreshKey) {
-        apps = loadHubApps(context)
+        val loadedApps = loadHubApps(context)
+        apps = loadedApps
+        apps = withContext(Dispatchers.IO) {
+            loadActionsStatuses(loadedApps)
+        }
     }
 
     val visibleApps = remember(apps, query, filter) {
@@ -317,15 +342,53 @@ private fun AppEntry(
         )
         if (app.repo != null) {
             Spacer(Modifier.height(2.dp))
-            Text(
-                "Actions",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
+            Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable(onClick = onActionsClick)
-                    .padding(horizontal = 6.dp, vertical = 3.dp),
-            )
+                    .padding(horizontal = 5.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.PlayArrow,
+                    contentDescription = "GitHub Actions",
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "Actions",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Box(
+                    modifier = Modifier
+                        .padding(start = 2.dp)
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(
+                            when (app.actionsStatus) {
+                                ActionsStatus.SUCCESS -> MaterialTheme.colorScheme.primary
+                                ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
+                                ActionsStatus.RUNNING -> MaterialTheme.colorScheme.tertiary
+                                ActionsStatus.QUEUED -> MaterialTheme.colorScheme.secondary
+                                ActionsStatus.CANCELLED -> MaterialTheme.colorScheme.outline
+                                ActionsStatus.LOADING,
+                                ActionsStatus.NONE,
+                                ActionsStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        ),
+                )
+                Text(
+                    app.actionsStatus.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when (app.actionsStatus) {
+                        ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
@@ -419,7 +482,61 @@ private fun loadKnownApp(pm: PackageManager, spec: ProjectSpec): HubApp {
         versionName = info?.versionName,
         launchIntent = if (info != null) pm.getLaunchIntentForPackage(spec.packageName) else null,
         icon = runCatching { applicationInfo?.loadIcon(pm) }.getOrNull(),
+        actionsStatus = ActionsStatus.LOADING,
     )
+}
+
+private suspend fun loadActionsStatuses(apps: List<HubApp>): List<HubApp> = coroutineScope {
+    apps.map { app ->
+        async {
+            if (app.repo == null) {
+                app
+            } else {
+                app.copy(actionsStatus = fetchLatestActionsStatus(app.repo))
+            }
+        }
+    }.awaitAll()
+}
+
+private fun fetchLatestActionsStatus(repo: String): ActionsStatus {
+    var connection: HttpURLConnection? = null
+    return try {
+        connection = (URL("https://api.github.com/repos/yagay/$repo/actions/runs?per_page=1").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 5000
+            readTimeout = 5000
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("User-Agent", "YagaYHub")
+            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+        }
+
+        if (connection.responseCode !in 200..299) {
+            return ActionsStatus.UNKNOWN
+        }
+
+        val body = connection.inputStream.bufferedReader().use { it.readText() }
+        val runs = JSONObject(body).optJSONArray("workflow_runs")
+        if (runs == null || runs.length() == 0) {
+            return ActionsStatus.NONE
+        }
+
+        val run = runs.getJSONObject(0)
+        when (run.optString("status")) {
+            "queued", "waiting", "requested", "pending" -> ActionsStatus.QUEUED
+            "in_progress" -> ActionsStatus.RUNNING
+            "completed" -> when (run.optString("conclusion")) {
+                "success" -> ActionsStatus.SUCCESS
+                "failure", "timed_out", "action_required", "stale" -> ActionsStatus.FAILURE
+                "cancelled", "skipped", "neutral" -> ActionsStatus.CANCELLED
+                else -> ActionsStatus.UNKNOWN
+            }
+            else -> ActionsStatus.UNKNOWN
+        }
+    } catch (_: Exception) {
+        ActionsStatus.UNKNOWN
+    } finally {
+        connection?.disconnect()
+    }
 }
 
 private fun getPackageInfoCompat(pm: PackageManager, packageName: String): PackageInfo? = runCatching {
