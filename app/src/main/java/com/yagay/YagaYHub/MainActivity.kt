@@ -4142,10 +4142,8 @@ private const val YBROWSER_CHAT_BINDING_REMOVE_ACTION =
     "com.yagay.YBrowser.action.CHATGPT_BINDING_REMOVE"
 private const val YBROWSER_SELECT_CHAT_ACTION =
     "com.yagay.YBrowser.action.SELECT_CHATGPT_CHAT"
-private const val YBROWSER_OPEN_POPUP_ACTION =
-    "com.yagay.YBrowser.action.OPEN_POPUP"
-private const val YBROWSER_SELECT_CHAT_POPUP_ACTION =
-    "com.yagay.YBrowser.action.SELECT_CHATGPT_CHAT_POPUP"
+private const val YBROWSER_OPEN_BROWSER_ACTION =
+    "com.yagay.YBrowser.action.OPEN_YAGAYHUB_BROWSER"
 private const val EXTRA_CHAT_BIND_REPO = "com.yagay.YBrowser.extra.BIND_REPO"
 private const val EXTRA_CHAT_BIND_PROJECT = "com.yagay.YBrowser.extra.BIND_PROJECT"
 private const val EXTRA_CHAT_BIND_URL = "com.yagay.YBrowser.extra.BIND_URL"
@@ -4416,7 +4414,7 @@ private fun startChatGptBinding(
     currentBinding: ChatBinding?,
 ) {
     val repo = app.repo ?: return
-    val intent = Intent(YBROWSER_SELECT_CHAT_POPUP_ACTION).apply {
+    val intent = Intent(YBROWSER_SELECT_CHAT_ACTION).apply {
         setPackage(YBROWSER_PACKAGE)
         putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
         putExtra(
@@ -4478,7 +4476,7 @@ private fun openChatPopup(
     bindingProject: String? = null,
     bindingTitle: String? = null,
 ) {
-    val intent = Intent(YBROWSER_OPEN_POPUP_ACTION).apply {
+    val intent = Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
         setPackage(YBROWSER_PACKAGE)
         putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
         putExtra(YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE, true)
