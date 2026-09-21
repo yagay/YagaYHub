@@ -2,8 +2,10 @@
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
 
-## 1.6.0
+## 1.6.1
 
+- 已安装 App 显示本机最近更新时间，读取 Android `PackageInfo.lastUpdateTime`，格式为 `本机更新 MM-dd HH:mm`。
+- Actions 时间显示增加 `Actions` 标签，与本机更新时间明确区分。
 - 显示最近一次 Actions 的本地时间（MM-dd HH:mm）。
 - 自动从 GitHub 拉取并合并账号项目，不再依赖硬编码项目列表；没有 APK / Android App 的仓库也会作为 GitHub 项目显示。
 - 新增“GitHub”筛选；纯仓库项目不会再被算作“未安装 App”。
