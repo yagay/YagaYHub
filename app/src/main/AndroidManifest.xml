@@ -65,6 +65,11 @@
                     android:host="oauth"
                     android:pathPrefix="/complete" />
             </intent-filter>
+
+            <intent-filter>
+                <action android:name="com.yagay.YagaYHub.action.CHATGPT_BOUND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <service
