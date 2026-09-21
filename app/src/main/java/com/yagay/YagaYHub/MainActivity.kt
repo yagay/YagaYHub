@@ -853,7 +853,7 @@ private fun DownloadPanel(
                         Text(
                             (progress * 100).toInt().toString() + "% · " +
                                 formatFileSize(state.downloadedBytes) + " / " +
-                                formatFileSize(total),
+                                formatFileSize(total ?: state.downloadedBytes),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
