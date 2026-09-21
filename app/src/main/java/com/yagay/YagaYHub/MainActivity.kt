@@ -135,6 +135,7 @@ import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private var chatBindingRevision by mutableIntStateOf(0)
+    private var quickChatBindingRequest by mutableStateOf<QuickChatBindingRequest?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -145,6 +146,30 @@ class MainActivity : ComponentActivity() {
                     HubScreen(
                         context = this,
                         chatBindingRevision = chatBindingRevision,
+                        quickChatBindingRequest = quickChatBindingRequest,
+                        onQuickChatBindingDismiss = {
+                            quickChatBindingRequest = null
+                        },
+                        onQuickChatBindingSelected = { app ->
+                            val repo = app.repo ?: return@HubScreen
+                            val request = quickChatBindingRequest ?: return@HubScreen
+                            val repoKey = app.repoOwner + "/" + repo
+                            saveChatBinding(
+                                context = this,
+                                repoKey = repoKey,
+                                title = request.title,
+                                url = request.url,
+                            )
+                            chatBindingRevision++
+                            quickChatBindingRequest = null
+                            syncChatBindingToYBrowser(
+                                context = this,
+                                repoKey = repoKey,
+                                project = app.name,
+                                url = request.url,
+                                title = request.title,
+                            )
+                        },
                     )
                 }
             }
@@ -157,33 +182,53 @@ class MainActivity : ComponentActivity() {
         handleChatBindingIntent(intent)
     }
 
-    private fun handleChatBindingIntent(intent: Intent?) {
-        if (intent?.action != ACTION_CHATGPT_BOUND) return
-        val repo = intent.getStringExtra(EXTRA_CHAT_BIND_REPO).orEmpty()
-        val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
-        val title = intent.getStringExtra(EXTRA_CHAT_BIND_TITLE)
-            .orEmpty()
-            .ifBlank { "ChatGPT" }
-        if (
-            repo.isBlank() ||
-            url.isBlank() ||
-            !isBindableChatGptUrl(url)
-        ) {
-            return
-        }
-
-        saveChatBinding(
-            context = this,
-            repoKey = repo,
-            title = title,
-            url = url,
-        )
+    override fun onResume() {
+        super.onResume()
         chatBindingRevision++
-        Toast.makeText(
-            this,
-            "已绑定 ChatGPT · " + repo.substringAfter('/'),
-            Toast.LENGTH_SHORT,
-        ).show()
+    }
+
+    private fun handleChatBindingIntent(intent: Intent?) {
+        when (intent?.action) {
+            ACTION_CHATGPT_BOUND -> {
+                val repo = intent.getStringExtra(EXTRA_CHAT_BIND_REPO).orEmpty()
+                val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
+                val title = intent.getStringExtra(EXTRA_CHAT_BIND_TITLE)
+                    .orEmpty()
+                    .ifBlank { "ChatGPT" }
+                if (
+                    repo.isBlank() ||
+                    url.isBlank() ||
+                    !isBindableChatGptUrl(url)
+                ) {
+                    return
+                }
+
+                saveChatBinding(
+                    context = this,
+                    repoKey = repo,
+                    title = title,
+                    url = url,
+                )
+                chatBindingRevision++
+                Toast.makeText(
+                    this,
+                    "已绑定 ChatGPT · " + repo.substringAfter('/'),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+            ACTION_REQUEST_CHATGPT_BINDING -> {
+                val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
+                val title = intent.getStringExtra(EXTRA_CHAT_BIND_TITLE)
+                    .orEmpty()
+                    .ifBlank { "ChatGPT" }
+                if (isBindableChatGptUrl(url)) {
+                    quickChatBindingRequest = QuickChatBindingRequest(
+                        url = url,
+                        title = title,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -380,6 +425,11 @@ private data class ChatBinding(
     val url: String,
 )
 
+private data class QuickChatBindingRequest(
+    val url: String,
+    val title: String,
+)
+
 private data class DownloadUiState(
     val appName: String,
     val stage: String = "准备下载",
@@ -413,6 +463,9 @@ private val knownProjects = listOf(
 private fun HubScreen(
     context: Context,
     chatBindingRevision: Int,
+    quickChatBindingRequest: QuickChatBindingRequest?,
+    onQuickChatBindingDismiss: () -> Unit,
+    onQuickChatBindingSelected: (HubApp) -> Unit,
 ) {
     var apps by remember { mutableStateOf(emptyList<HubApp>()) }
     var query by remember { mutableStateOf("") }
