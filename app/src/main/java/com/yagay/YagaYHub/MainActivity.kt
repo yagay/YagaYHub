@@ -124,6 +124,7 @@ private data class HubApp(
     val actionsStatus: ActionsStatus = ActionsStatus.NONE,
     val latestRunId: Long? = null,
     val latestArtifactId: Long? = null,
+    val latestArtifactSizeBytes: Long? = null,
 )
 
 private enum class AppFilter(val label: String) {
@@ -416,20 +417,32 @@ private fun AppEntry(
                     )
                 }
 
-                Icon(
-                    Icons.Outlined.Download,
-                    contentDescription = "下载最新成功构建 ZIP",
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
-                        .size(22.dp)
-                        .clip(CircleShape)
+                        .clip(RoundedCornerShape(8.dp))
                         .clickable(onClick = onArtifactClick)
-                        .padding(3.dp),
-                    tint = if (app.latestArtifactId != null) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.outline
-                    },
-                )
+                        .padding(horizontal = 2.dp, vertical = 1.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Download,
+                        contentDescription = "下载最新成功构建 ZIP",
+                        modifier = Modifier.size(18.dp),
+                        tint = if (app.latestArtifactId != null) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.outline
+                        },
+                    )
+                    app.latestArtifactSizeBytes?.let { sizeBytes ->
+                        Text(
+                            formatFileSize(sizeBytes),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                }
             }
         }
     }
@@ -532,6 +545,7 @@ private data class LatestActionsInfo(
     val status: ActionsStatus,
     val runId: Long?,
     val artifactId: Long?,
+    val artifactSizeBytes: Long?,
 )
 
 private suspend fun loadActionsStatuses(apps: List<HubApp>): List<HubApp> = coroutineScope {
@@ -545,6 +559,7 @@ private suspend fun loadActionsStatuses(apps: List<HubApp>): List<HubApp> = coro
                     actionsStatus = info.status,
                     latestRunId = info.runId,
                     latestArtifactId = info.artifactId,
+                    latestArtifactSizeBytes = info.artifactSizeBytes,
                 )
             }
         }
@@ -558,13 +573,13 @@ private fun fetchLatestActionsInfo(repo: String): LatestActionsInfo {
             "https://api.github.com/repos/yagay/" + repo + "/actions/runs?per_page=1"
         )
         if (connection.responseCode !in 200..299) {
-            return LatestActionsInfo(ActionsStatus.UNKNOWN, null, null)
+            return LatestActionsInfo(ActionsStatus.UNKNOWN, null, null, null)
         }
 
         val body = connection.inputStream.bufferedReader().use { it.readText() }
         val runs = JSONObject(body).optJSONArray("workflow_runs")
         if (runs == null || runs.length() == 0) {
-            return LatestActionsInfo(ActionsStatus.NONE, null, null)
+            return LatestActionsInfo(ActionsStatus.NONE, null, null, null)
         }
 
         val run = runs.getJSONObject(0)
@@ -572,21 +587,26 @@ private fun fetchLatestActionsInfo(repo: String): LatestActionsInfo {
         val runId = run.optLong("id").takeIf { it > 0L }
 
         // 只处理最新一次 Actions：只有最新一次成功，才继续请求 artifact。
-        val artifactId = if (status == ActionsStatus.SUCCESS && runId != null) {
-            fetchLatestArtifactId(repo, runId)
+        val artifactInfo = if (status == ActionsStatus.SUCCESS && runId != null) {
+            fetchLatestArtifactInfo(repo, runId)
         } else {
             null
         }
 
-        LatestActionsInfo(status, runId, artifactId)
+        LatestActionsInfo(
+            status = status,
+            runId = runId,
+            artifactId = artifactInfo?.first,
+            artifactSizeBytes = artifactInfo?.second,
+        )
     } catch (_: Exception) {
-        LatestActionsInfo(ActionsStatus.UNKNOWN, null, null)
+        LatestActionsInfo(ActionsStatus.UNKNOWN, null, null, null)
     } finally {
         connection?.disconnect()
     }
 }
 
-private fun fetchLatestArtifactId(repo: String, runId: Long): Long? {
+private fun fetchLatestArtifactInfo(repo: String, runId: Long): Pair<Long, Long>? {
     var connection: HttpURLConnection? = null
     return try {
         connection = githubGet(
@@ -602,7 +622,8 @@ private fun fetchLatestArtifactId(repo: String, runId: Long): Long? {
             val artifact = artifacts.getJSONObject(index)
             if (!artifact.optBoolean("expired", true)) {
                 val id = artifact.optLong("id")
-                if (id > 0L) return id
+                val sizeBytes = artifact.optLong("size_in_bytes").coerceAtLeast(0L)
+                if (id > 0L) return id to sizeBytes
             }
         }
         null
@@ -611,6 +632,16 @@ private fun fetchLatestArtifactId(repo: String, runId: Long): Long? {
     } finally {
         connection?.disconnect()
     }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    if (bytes < 1024L) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024.0) return String.format("%.1f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024.0) return String.format("%.1f MB", mb)
+    val gb = mb / 1024.0
+    return String.format("%.2f GB", gb)
 }
 
 private fun mapActionsStatus(run: JSONObject): ActionsStatus =
