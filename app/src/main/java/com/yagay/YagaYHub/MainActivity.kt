@@ -830,6 +830,9 @@ private fun HubScreen(
                                 context,
                                 chatBinding.url,
                                 reuseExisting = true,
+                                bindingRepoKey = chatBinding.repoKey,
+                                bindingProject = app.name,
+                                bindingTitle = chatBinding.title,
                             )
                             else -> startChatGptBinding(
                                 context = context,
@@ -3839,12 +3842,20 @@ private fun openUrl(
     context: Context,
     url: String,
     reuseExisting: Boolean = false,
+    bindingRepoKey: String? = null,
+    bindingProject: String? = null,
+    bindingTitle: String? = null,
 ) {
     val intent = Intent(YBROWSER_ACTION).apply {
         setPackage(YBROWSER_PACKAGE)
         putExtra(YBROWSER_EXTRA_URL, url)
         if (reuseExisting) {
             putExtra(YBROWSER_EXTRA_REUSE_EXISTING, true)
+        }
+        if (!bindingRepoKey.isNullOrBlank()) {
+            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
+            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
+            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
         }
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
