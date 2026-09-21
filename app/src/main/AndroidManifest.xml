@@ -82,6 +82,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="com.yagay.YagaYHub.action.REMOVE_CHATGPT_BINDING" />
+                <action android:name="com.yagay.YagaYHub.action.CHATGPT_BOUND" />
             </intent-filter>
         </receiver>
 
