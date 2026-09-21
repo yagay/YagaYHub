@@ -11,8 +11,8 @@ android {
         applicationId = "com.yagay.YagaYHub"
         minSdk = 31
         targetSdk = 37
-        versionCode = 15
-        versionName = "1.6.4"
+        versionCode = 16
+        versionName = "1.6.5"
     }
 
     buildFeatures {
