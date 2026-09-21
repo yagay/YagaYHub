@@ -934,6 +934,17 @@ private fun HubScreen(
                         }
                         Unit
                     }
+                    val onLatestActionClick: () -> Unit = {
+                        app.repo?.let { repo ->
+                            val base =
+                                "https://github.com/" + app.repoOwner + "/" + repo
+                            val url = app.latestRunId?.let { runId ->
+                                base + "/actions/runs/" + runId
+                            } ?: (base + "/actions")
+                            openUrl(context, url)
+                        }
+                        Unit
+                    }
                     val onArtifactClick: () -> Unit = {
                         val repo = app.repo
                         val runId = app.latestRunId
@@ -1018,6 +1029,7 @@ private fun HubScreen(
                             onClick = onClick,
                             onLongClick = onLongClick,
                             onActionsClick = onActionsClick,
+                            onLatestActionClick = onLatestActionClick,
                             onArtifactClick = onArtifactClick,
                             chatBinding = chatBinding,
                             chatBindingCount = chatBindings.size,
@@ -1030,6 +1042,7 @@ private fun HubScreen(
                             onClick = onClick,
                             onLongClick = onLongClick,
                             onActionsClick = onActionsClick,
+                            onLatestActionClick = onLatestActionClick,
                             onArtifactClick = onArtifactClick,
                             chatBinding = chatBinding,
                             chatBindingCount = chatBindings.size,
@@ -2075,6 +2088,7 @@ private fun AppListEntry(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onActionsClick: () -> Unit,
+    onLatestActionClick: () -> Unit,
     onArtifactClick: () -> Unit,
     chatBinding: ChatBinding?,
     chatBindingCount: Int,
@@ -2196,7 +2210,7 @@ private fun AppListEntry(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable(onClick = onActionsClick)
+                            .clickable(onClick = onLatestActionClick)
                             .padding(horizontal = 6.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -2314,6 +2328,7 @@ private fun AppEntry(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onActionsClick: () -> Unit,
+    onLatestActionClick: () -> Unit,
     onArtifactClick: () -> Unit,
     chatBinding: ChatBinding?,
     chatBindingCount: Int,
@@ -2404,7 +2419,7 @@ private fun AppEntry(
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onActionsClick)
+                        .clickable(onClick = onLatestActionClick)
                         .padding(horizontal = 4.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
