@@ -1073,13 +1073,13 @@ private fun HubScreen(
                                 key = { it.repoOwner + "/" + it.repo },
                             ) { app ->
                                 val repo = app.repo ?: return@lazyItems
-                                val existing = loadChatBinding(
+                                val selected = loadChatBindings(
                                     context = context,
                                     owner = app.repoOwner,
                                     repo = repo,
-                                )
-                                val selected = existing?.url
-                                    ?.let { sameChatBindingUrl(it, request.url) } == true
+                                ).any { existing ->
+                                    sameChatBindingUrl(existing.url, request.url)
+                                }
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
