@@ -381,7 +381,7 @@ private fun HubScreen(context: Context) {
                 }
             } else {
                 val itemContent: @Composable (HubApp) -> Unit = { app ->
-                    val onClick = {
+                    val onClick: () -> Unit = {
                         when {
                             app.launchIntent != null -> openApp(context, app)
                             app.repo != null -> openUrl(
@@ -389,26 +389,29 @@ private fun HubScreen(context: Context) {
                                 "https://github.com/" + app.repoOwner + "/" + app.repo
                             )
                             app.installed -> openAppDetails(context, app.packageName)
+                            else -> Unit
                         }
                     }
-                    val onLongClick = {
+                    val onLongClick: () -> Unit = {
                         when {
                             app.installed -> openAppDetails(context, app.packageName)
                             app.repo != null -> openUrl(
                                 context,
                                 "https://github.com/" + app.repoOwner + "/" + app.repo
                             )
+                            else -> Unit
                         }
                     }
-                    val onActionsClick = {
+                    val onActionsClick: () -> Unit = {
                         app.repo?.let { repo ->
                             openUrl(
                                 context,
                                 "https://github.com/" + app.repoOwner + "/" + repo + "/actions"
                             )
                         }
+                        Unit
                     }
-                    val onArtifactClick = {
+                    val onArtifactClick: () -> Unit = {
                         val repo = app.repo
                         val runId = app.latestRunId
                         val artifactId = app.latestArtifactId
