@@ -43,6 +43,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
@@ -110,6 +111,12 @@ private enum class ActionsStatus(val label: String) {
     UNKNOWN("未知"),
 }
 
+private data class ActionsArtifact(
+    val id: Long,
+    val runId: Long,
+    val name: String,
+)
+
 private data class HubApp(
     val name: String,
     val packageName: String,
@@ -121,6 +128,7 @@ private data class HubApp(
     val icon: Drawable?,
     val autoDiscovered: Boolean = false,
     val actionsStatus: ActionsStatus = ActionsStatus.NONE,
+    val latestSuccessfulArtifact: ActionsArtifact? = null,
 )
 
 private enum class AppFilter(val label: String) {
@@ -272,6 +280,20 @@ private fun HubScreen(context: Context) {
                                         openUrl(context, "https://github.com/yagay/$repo/actions")
                                     }
                                 },
+                                onArtifactClick = {
+                                    val repo = app.repo
+                                    val artifact = app.latestSuccessfulArtifact
+                                    if (repo != null && artifact != null) {
+                                        openUrl(
+                                            context,
+                                            "https://github.com/yagay/" + repo +
+                                                "/actions/runs/" + artifact.runId +
+                                                "/artifacts/" + artifact.id
+                                        )
+                                    } else {
+                                        Toast.makeText(context, "暂无可下载的成功构建 ZIP", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
                             )
                         }
                     }
@@ -288,6 +310,7 @@ private fun AppEntry(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onActionsClick: () -> Unit,
+    onArtifactClick: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -343,50 +366,64 @@ private fun AppEntry(
         if (app.repo != null) {
             Spacer(Modifier.height(2.dp))
             Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onActionsClick)
-                    .padding(horizontal = 5.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Icon(
-                    Icons.Outlined.PlayArrow,
-                    contentDescription = "GitHub Actions",
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    "Actions",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Box(
+                Row(
                     modifier = Modifier
-                        .padding(start = 2.dp)
-                        .size(6.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onActionsClick)
+                        .padding(horizontal = 4.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.PlayArrow,
+                        contentDescription = "GitHub Actions",
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when (app.actionsStatus) {
+                                    ActionsStatus.SUCCESS -> MaterialTheme.colorScheme.primary
+                                    ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
+                                    ActionsStatus.RUNNING -> MaterialTheme.colorScheme.tertiary
+                                    ActionsStatus.QUEUED -> MaterialTheme.colorScheme.secondary
+                                    ActionsStatus.CANCELLED -> MaterialTheme.colorScheme.outline
+                                    ActionsStatus.LOADING,
+                                    ActionsStatus.NONE,
+                                    ActionsStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            ),
+                    )
+                    Text(
+                        app.actionsStatus.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = when (app.actionsStatus) {
+                            ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                    )
+                }
+
+                Icon(
+                    Icons.Outlined.Download,
+                    contentDescription = "下载最近成功构建 ZIP",
+                    modifier = Modifier
+                        .size(22.dp)
                         .clip(CircleShape)
-                        .background(
-                            when (app.actionsStatus) {
-                                ActionsStatus.SUCCESS -> MaterialTheme.colorScheme.primary
-                                ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
-                                ActionsStatus.RUNNING -> MaterialTheme.colorScheme.tertiary
-                                ActionsStatus.QUEUED -> MaterialTheme.colorScheme.secondary
-                                ActionsStatus.CANCELLED -> MaterialTheme.colorScheme.outline
-                                ActionsStatus.LOADING,
-                                ActionsStatus.NONE,
-                                ActionsStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        ),
-                )
-                Text(
-                    app.actionsStatus.label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = when (app.actionsStatus) {
-                        ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        .clickable(onClick = onArtifactClick)
+                        .padding(3.dp),
+                    tint = if (app.latestSuccessfulArtifact != null) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outline
                     },
-                    maxLines = 1,
                 )
             }
         }
@@ -486,58 +523,125 @@ private fun loadKnownApp(pm: PackageManager, spec: ProjectSpec): HubApp {
     )
 }
 
+private data class RepoActionsInfo(
+    val status: ActionsStatus,
+    val artifact: ActionsArtifact?,
+)
+
 private suspend fun loadActionsStatuses(apps: List<HubApp>): List<HubApp> = coroutineScope {
     apps.map { app ->
         async {
             if (app.repo == null) {
                 app
             } else {
-                app.copy(actionsStatus = fetchLatestActionsStatus(app.repo))
+                val info = fetchRepoActionsInfo(app.repo)
+                app.copy(
+                    actionsStatus = info.status,
+                    latestSuccessfulArtifact = info.artifact,
+                )
             }
         }
     }.awaitAll()
 }
 
-private fun fetchLatestActionsStatus(repo: String): ActionsStatus {
-    var connection: HttpURLConnection? = null
+private fun fetchRepoActionsInfo(repo: String): RepoActionsInfo {
+    var runsConnection: HttpURLConnection? = null
     return try {
-        connection = (URL("https://api.github.com/repos/yagay/$repo/actions/runs?per_page=1").openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 5000
-            readTimeout = 5000
-            setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("User-Agent", "YagaYHub")
-            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+        runsConnection = githubGet(
+            "https://api.github.com/repos/yagay/" + repo + "/actions/runs?per_page=20"
+        )
+
+        if (runsConnection.responseCode !in 200..299) {
+            return RepoActionsInfo(ActionsStatus.UNKNOWN, null)
         }
 
-        if (connection.responseCode !in 200..299) {
-            return ActionsStatus.UNKNOWN
-        }
-
-        val body = connection.inputStream.bufferedReader().use { it.readText() }
+        val body = runsConnection.inputStream.bufferedReader().use { it.readText() }
         val runs = JSONObject(body).optJSONArray("workflow_runs")
         if (runs == null || runs.length() == 0) {
-            return ActionsStatus.NONE
+            return RepoActionsInfo(ActionsStatus.NONE, null)
         }
 
-        val run = runs.getJSONObject(0)
-        when (run.optString("status")) {
-            "queued", "waiting", "requested", "pending" -> ActionsStatus.QUEUED
-            "in_progress" -> ActionsStatus.RUNNING
-            "completed" -> when (run.optString("conclusion")) {
-                "success" -> ActionsStatus.SUCCESS
-                "failure", "timed_out", "action_required", "stale" -> ActionsStatus.FAILURE
-                "cancelled", "skipped", "neutral" -> ActionsStatus.CANCELLED
-                else -> ActionsStatus.UNKNOWN
+        val latestRun = runs.getJSONObject(0)
+        val latestStatus = mapActionsStatus(latestRun)
+
+        var successfulRunId: Long? = null
+        for (index in 0 until runs.length()) {
+            val run = runs.getJSONObject(index)
+            if (
+                run.optString("status") == "completed" &&
+                run.optString("conclusion") == "success"
+            ) {
+                successfulRunId = run.optLong("id").takeIf { it > 0L }
+                if (successfulRunId != null) break
             }
-            else -> ActionsStatus.UNKNOWN
         }
+
+        RepoActionsInfo(
+            status = latestStatus,
+            artifact = successfulRunId?.let { fetchLatestArtifact(repo, it) },
+        )
     } catch (_: Exception) {
-        ActionsStatus.UNKNOWN
+        RepoActionsInfo(ActionsStatus.UNKNOWN, null)
+    } finally {
+        runsConnection?.disconnect()
+    }
+}
+
+private fun fetchLatestArtifact(repo: String, runId: Long): ActionsArtifact? {
+    var connection: HttpURLConnection? = null
+    return try {
+        connection = githubGet(
+            "https://api.github.com/repos/yagay/" + repo +
+                "/actions/runs/" + runId + "/artifacts?per_page=100"
+        )
+        if (connection.responseCode !in 200..299) return null
+
+        val body = connection.inputStream.bufferedReader().use { it.readText() }
+        val artifacts = JSONObject(body).optJSONArray("artifacts") ?: return null
+
+        for (index in 0 until artifacts.length()) {
+            val artifact = artifacts.getJSONObject(index)
+            if (!artifact.optBoolean("expired", true)) {
+                val id = artifact.optLong("id")
+                if (id > 0L) {
+                    return ActionsArtifact(
+                        id = id,
+                        runId = runId,
+                        name = artifact.optString("name", "artifact"),
+                    )
+                }
+            }
+        }
+        null
+    } catch (_: Exception) {
+        null
     } finally {
         connection?.disconnect()
     }
 }
+
+private fun mapActionsStatus(run: JSONObject): ActionsStatus =
+    when (run.optString("status")) {
+        "queued", "waiting", "requested", "pending" -> ActionsStatus.QUEUED
+        "in_progress" -> ActionsStatus.RUNNING
+        "completed" -> when (run.optString("conclusion")) {
+            "success" -> ActionsStatus.SUCCESS
+            "failure", "timed_out", "action_required", "stale" -> ActionsStatus.FAILURE
+            "cancelled", "skipped", "neutral" -> ActionsStatus.CANCELLED
+            else -> ActionsStatus.UNKNOWN
+        }
+        else -> ActionsStatus.UNKNOWN
+    }
+
+private fun githubGet(url: String): HttpURLConnection =
+    (URL(url).openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 5000
+        readTimeout = 5000
+        setRequestProperty("Accept", "application/vnd.github+json")
+        setRequestProperty("User-Agent", "YagaYHub")
+        setRequestProperty("X-GitHub-Api-Version", "2026-03-10")
+    }
 
 private fun getPackageInfoCompat(pm: PackageManager, packageName: String): PackageInfo? = runCatching {
     if (Build.VERSION.SDK_INT >= 33) {
