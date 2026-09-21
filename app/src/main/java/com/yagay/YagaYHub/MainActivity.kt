@@ -36,9 +36,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.net.URL
 import java.net.URLEncoder
 import java.security.KeyStore
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -362,6 +366,8 @@ private fun HubScreen(context: Context) {
     var showSettings by remember { mutableStateOf(false) }
     var githubToken by remember { mutableStateOf(loadGithubToken(context)) }
     var githubClientId by remember { mutableStateOf(loadGithubClientId(context)) }
+    var githubClientSecret by remember { mutableStateOf(loadGithubClientSecret(context)) }
+    var webAuthInProgress by remember { mutableStateOf(false) }
     var deviceAuth by remember { mutableStateOf<DeviceAuthInfo?>(null) }
     var authPolling by remember { mutableStateOf(false) }
     var authStatus by remember { mutableStateOf("") }
@@ -751,6 +757,8 @@ private fun HubScreen(context: Context) {
         GitHubSettingsDialog(
             currentToken = githubToken,
             currentClientId = githubClientId,
+            currentClientSecret = githubClientSecret,
+            webAuthInProgress = webAuthInProgress,
             downloadDirectoryLabel = downloadDirectoryLabel(downloadTreeUri),
             rootCleanupEnabled = rootCleanupEnabled,
             rootStatus = rootStatus,
@@ -801,6 +809,71 @@ private fun HubScreen(context: Context) {
                     }
                 } else {
                     rootStatus = RootStatus.NOT_CHECKED
+                }
+            },
+            onWebLogin = { clientId, clientSecret ->
+                saveGithubClientId(context, clientId)
+                saveGithubClientSecret(context, clientSecret)
+                githubClientId = clientId
+                githubClientSecret = clientSecret
+                showSettings = false
+                webAuthInProgress = true
+                scope.launch {
+                    val session = withContext(Dispatchers.IO) {
+                        createGithubWebAuthSession()
+                    }
+                    if (session == null) {
+                        webAuthInProgress = false
+                        Toast.makeText(
+                            context,
+                            "无法启动 GitHub 登录回调",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    } else {
+                        val authorizeUrl = buildGithubAuthorizeUrl(
+                            clientId = clientId,
+                            session = session,
+                        )
+                        runCatching {
+                            CustomTabsIntent.Builder()
+                                .setShowTitle(true)
+                                .build()
+                                .launchUrl(context, Uri.parse(authorizeUrl))
+                        }.onFailure {
+                            session.close()
+                            webAuthInProgress = false
+                            Toast.makeText(
+                                context,
+                                "无法打开 GitHub 登录界面",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }.onSuccess {
+                            val token = withContext(Dispatchers.IO) {
+                                completeGithubWebAuth(
+                                    session = session,
+                                    clientId = clientId,
+                                    clientSecret = clientSecret,
+                                )
+                            }
+                            webAuthInProgress = false
+                            if (token.isNullOrBlank()) {
+                                Toast.makeText(
+                                    context,
+                                    "GitHub 网页授权失败或已取消",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            } else {
+                                saveGithubToken(context, token)
+                                githubToken = token
+                                refreshKey++
+                                Toast.makeText(
+                                    context,
+                                    "GitHub 登录授权成功",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        }
+                    }
                 }
             },
             onAuthorize = { clientId ->
@@ -872,6 +945,8 @@ private fun HubScreen(context: Context) {
 private fun GitHubSettingsDialog(
     currentToken: String,
     currentClientId: String,
+    currentClientSecret: String,
+    webAuthInProgress: Boolean,
     downloadDirectoryLabel: String,
     rootCleanupEnabled: Boolean,
     rootStatus: RootStatus,
@@ -881,10 +956,14 @@ private fun GitHubSettingsDialog(
     onChooseDownloadDirectory: () -> Unit,
     onResetDownloadDirectory: () -> Unit,
     onRootCleanupChanged: (Boolean) -> Unit,
+    onWebLogin: (String, String) -> Unit,
     onAuthorize: (String) -> Unit,
 ) {
     var token by remember(currentToken) { mutableStateOf(currentToken) }
     var clientId by remember(currentClientId) { mutableStateOf(currentClientId) }
+    var clientSecret by remember(currentClientSecret) {
+        mutableStateOf(currentClientSecret)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -892,7 +971,7 @@ private fun GitHubSettingsDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "推荐使用 GitHub App 账号授权；现有 Fine-grained Token 仍可继续使用。",
+                    "推荐使用 GitHub 网页登录授权。GitHub App Callback URL 请设置为 http://127.0.0.1/oauth/callback；Device Flow 和 Fine-grained Token 仍作为备用。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -935,11 +1014,39 @@ private fun GitHubSettingsDialog(
                     label = { Text("GitHub App Client ID") },
                     placeholder = { Text("Iv1.…") },
                 )
+                OutlinedTextField(
+                    value = clientSecret,
+                    onValueChange = { clientSecret = it.trim() },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("GitHub App Client Secret") },
+                    placeholder = { Text("仅加密保存在本机") },
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                TextButton(
+                    onClick = {
+                        onWebLogin(
+                            clientId.trim(),
+                            clientSecret.trim(),
+                        )
+                    },
+                    enabled = clientId.isNotBlank() &&
+                        clientSecret.isNotBlank() &&
+                        !webAuthInProgress,
+                ) {
+                    Text(
+                        if (webAuthInProgress) {
+                            "正在登录 GitHub…"
+                        } else {
+                            "登录 GitHub"
+                        }
+                    )
+                }
                 TextButton(
                     onClick = { onAuthorize(clientId.trim()) },
-                    enabled = clientId.isNotBlank(),
+                    enabled = clientId.isNotBlank() && !webAuthInProgress,
                 ) {
-                    Text("使用 GitHub 账号授权")
+                    Text("Device Flow（备用）")
                 }
                 OutlinedTextField(
                     value = token,
@@ -2654,6 +2761,150 @@ private fun downloadDirectoryLabel(treeUri: String): String =
         "自定义目录"
     }
 
+private data class GithubWebAuthSession(
+    val serverSocket: ServerSocket,
+    val state: String,
+    val codeVerifier: String,
+    val codeChallenge: String,
+    val redirectUri: String,
+) {
+    fun close() {
+        runCatching { serverSocket.close() }
+    }
+}
+
+private fun createGithubWebAuthSession(): GithubWebAuthSession? {
+    return runCatching {
+        val server = ServerSocket(
+            0,
+            1,
+            InetAddress.getByName("127.0.0.1"),
+        ).apply {
+            soTimeout = 180_000
+        }
+        val verifier = randomUrlSafeString(64)
+        val challenge = Base64.encodeToString(
+            MessageDigest.getInstance("SHA-256")
+                .digest(verifier.toByteArray(Charsets.US_ASCII)),
+            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
+        )
+        GithubWebAuthSession(
+            serverSocket = server,
+            state = randomUrlSafeString(32),
+            codeVerifier = verifier,
+            codeChallenge = challenge,
+            redirectUri = "http://127.0.0.1:" + server.localPort + "/oauth/callback",
+        )
+    }.getOrNull()
+}
+
+private fun randomUrlSafeString(byteCount: Int): String {
+    val bytes = ByteArray(byteCount)
+    SecureRandom().nextBytes(bytes)
+    return Base64.encodeToString(
+        bytes,
+        Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
+    )
+}
+
+private fun buildGithubAuthorizeUrl(
+    clientId: String,
+    session: GithubWebAuthSession,
+): String {
+    fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
+    return "https://github.com/login/oauth/authorize" +
+        "?client_id=" + enc(clientId) +
+        "&redirect_uri=" + enc(session.redirectUri) +
+        "&state=" + enc(session.state) +
+        "&code_challenge=" + enc(session.codeChallenge) +
+        "&code_challenge_method=S256"
+}
+
+private fun completeGithubWebAuth(
+    session: GithubWebAuthSession,
+    clientId: String,
+    clientSecret: String,
+): String? {
+    return try {
+        val socket = session.serverSocket.accept()
+        socket.use { client ->
+            val reader = client.getInputStream().bufferedReader()
+            val requestLine = reader.readLine().orEmpty()
+            while (true) {
+                val line = reader.readLine() ?: break
+                if (line.isBlank()) break
+            }
+
+            val target = requestLine
+                .split(' ')
+                .getOrNull(1)
+                .orEmpty()
+            val callbackUri = Uri.parse("http://127.0.0.1" + target)
+            val code = callbackUri.getQueryParameter("code")
+            val returnedState = callbackUri.getQueryParameter("state")
+            val error = callbackUri.getQueryParameter("error")
+
+            val token = if (
+                error.isNullOrBlank() &&
+                !code.isNullOrBlank() &&
+                returnedState == session.state
+            ) {
+                exchangeGithubAuthorizationCode(
+                    clientId = clientId,
+                    clientSecret = clientSecret,
+                    code = code,
+                    redirectUri = session.redirectUri,
+                    codeVerifier = session.codeVerifier,
+                )
+            } else {
+                null
+            }
+
+            val response = if (token.isNullOrBlank()) {
+                "HTTP/1.1 302 Found\r\n" +
+                    "Location: yagayhub://oauth/complete?status=error\r\n" +
+                    "Content-Length: 0\r\n" +
+                    "Connection: close\r\n\r\n"
+            } else {
+                "HTTP/1.1 302 Found\r\n" +
+                    "Location: yagayhub://oauth/complete?status=success\r\n" +
+                    "Content-Length: 0\r\n" +
+                    "Connection: close\r\n\r\n"
+            }
+            client.getOutputStream().use { output ->
+                output.write(response.toByteArray(Charsets.US_ASCII))
+                output.flush()
+            }
+            token
+        }
+    } catch (_: Exception) {
+        null
+    } finally {
+        session.close()
+    }
+}
+
+private fun exchangeGithubAuthorizationCode(
+    clientId: String,
+    clientSecret: String,
+    code: String,
+    redirectUri: String,
+    codeVerifier: String,
+): String? {
+    val response = postGithubForm(
+        "https://github.com/login/oauth/access_token",
+        mapOf(
+            "client_id" to clientId,
+            "client_secret" to clientSecret,
+            "code" to code,
+            "redirect_uri" to redirectUri,
+            "code_verifier" to codeVerifier,
+        ),
+    ) ?: return null
+    return response.optString("access_token")
+        .takeIf { it.isNotBlank() }
+}
+
 private data class DeviceAuthInfo(
     val deviceCode: String,
     val userCode: String,
@@ -2751,6 +3002,63 @@ private fun copyText(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("GitHub authorization code", text))
     Toast.makeText(context, "授权码已复制", Toast.LENGTH_SHORT).show()
+}
+
+private fun saveGithubClientSecret(
+    context: Context,
+    clientSecret: String,
+) {
+    if (clientSecret.isBlank()) {
+        clearGithubClientSecret(context)
+        return
+    }
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, getOrCreateTokenKey())
+    val encrypted = cipher.doFinal(clientSecret.toByteArray(Charsets.UTF_8))
+
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(
+            GITHUB_CLIENT_SECRET_IV,
+            Base64.encodeToString(cipher.iv, Base64.NO_WRAP),
+        )
+        .putString(
+            GITHUB_CLIENT_SECRET_DATA,
+            Base64.encodeToString(encrypted, Base64.NO_WRAP),
+        )
+        .apply()
+}
+
+private fun loadGithubClientSecret(context: Context): String {
+    return runCatching {
+        val prefs = context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        val iv = prefs.getString(GITHUB_CLIENT_SECRET_IV, null) ?: return ""
+        val encrypted = prefs.getString(GITHUB_CLIENT_SECRET_DATA, null) ?: return ""
+
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(
+            Cipher.DECRYPT_MODE,
+            getOrCreateTokenKey(),
+            GCMParameterSpec(
+                128,
+                Base64.decode(iv, Base64.NO_WRAP),
+            ),
+        )
+        String(
+            cipher.doFinal(
+                Base64.decode(encrypted, Base64.NO_WRAP)
+            ),
+            Charsets.UTF_8,
+        )
+    }.getOrElse { "" }
+}
+
+private fun clearGithubClientSecret(context: Context) {
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .remove(GITHUB_CLIENT_SECRET_IV)
+        .remove(GITHUB_CLIENT_SECRET_DATA)
+        .apply()
 }
 
 private fun saveGithubClientId(context: Context, clientId: String) {
@@ -2863,6 +3171,8 @@ private const val TOKEN_PREFS = "github_secure"
 private const val TOKEN_IV = "token_iv"
 private const val TOKEN_DATA = "token_data"
 private const val GITHUB_CLIENT_ID = "github_client_id"
+private const val GITHUB_CLIENT_SECRET_IV = "github_client_secret_iv"
+private const val GITHUB_CLIENT_SECRET_DATA = "github_client_secret_data"
 private const val DOWNLOAD_TREE_URI = "download_tree_uri"
 private const val ROOT_CLEANUP_ENABLED = "root_cleanup_enabled"
 private const val LAYOUT_MODE = "layout_mode"
