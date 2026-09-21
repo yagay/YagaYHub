@@ -1,6 +1,8 @@
 package com.yagay.YagaYHub
 
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -24,6 +26,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.security.KeyStore
 import java.time.Instant
 import java.time.ZoneId
@@ -38,8 +41,10 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -96,6 +101,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -177,6 +183,10 @@ private fun HubScreen(context: Context) {
     var refreshKey by remember { mutableStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
     var githubToken by remember { mutableStateOf(loadGithubToken(context)) }
+    var githubClientId by remember { mutableStateOf(loadGithubClientId(context)) }
+    var deviceAuth by remember { mutableStateOf<DeviceAuthInfo?>(null) }
+    var authPolling by remember { mutableStateOf(false) }
+    var authStatus by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(refreshKey, githubToken) {
@@ -258,7 +268,9 @@ private fun HubScreen(context: Context) {
 
             Spacer(Modifier.height(6.dp))
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 AppFilter.entries.forEach { item ->
@@ -307,7 +319,10 @@ private fun HubScreen(context: Context) {
                                 onLongClick = {
                                     when {
                                         app.installed -> openAppDetails(context, app.packageName)
-                                        app.repo != null -> openUrl(context, "https://github.com/yagay/${app.repo}")
+                                        app.repo != null -> openUrl(
+                                            context,
+                                            "https://github.com/" + app.repoOwner + "/" + app.repo
+                                        )
                                     }
                                 },
                                 onActionsClick = {
@@ -371,50 +386,128 @@ private fun HubScreen(context: Context) {
     }
 
     if (showSettings) {
-        GitHubTokenDialog(
+        GitHubSettingsDialog(
             currentToken = githubToken,
+            currentClientId = githubClientId,
             onDismiss = { showSettings = false },
-            onSave = { token ->
+            onSaveToken = { token ->
                 saveGithubToken(context, token)
                 githubToken = token
                 showSettings = false
                 Toast.makeText(context, "GitHub Token 已保存", Toast.LENGTH_SHORT).show()
             },
-            onClear = {
+            onClearToken = {
                 clearGithubToken(context)
                 githubToken = ""
-                showSettings = false
                 Toast.makeText(context, "GitHub Token 已清除", Toast.LENGTH_SHORT).show()
+            },
+            onAuthorize = { clientId ->
+                saveGithubClientId(context, clientId)
+                githubClientId = clientId
+                showSettings = false
+                scope.launch {
+                    val info = withContext(Dispatchers.IO) {
+                        requestGithubDeviceCode(clientId)
+                    }
+                    if (info == null) {
+                        Toast.makeText(
+                            context,
+                            "无法开始 GitHub 账号授权，请检查 Client ID 和 Device Flow 设置",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        deviceAuth = info
+                        authStatus = "等待打开 GitHub 授权"
+                    }
+                }
+            },
+        )
+    }
+
+    deviceAuth?.let { info ->
+        GithubDeviceAuthDialog(
+            info = info,
+            polling = authPolling,
+            status = authStatus,
+            onDismiss = {
+                if (!authPolling) {
+                    deviceAuth = null
+                    authStatus = ""
+                }
+            },
+            onOpenGithub = {
+                copyText(context, info.userCode)
+                openUrl(context, info.verificationUri)
+                if (!authPolling) {
+                    authPolling = true
+                    authStatus = "等待 GitHub 授权…"
+                    scope.launch {
+                        val token = withContext(Dispatchers.IO) {
+                            pollGithubDeviceToken(githubClientId, info)
+                        }
+                        authPolling = false
+                        if (token.isNullOrBlank()) {
+                            authStatus = "授权失败或已超时"
+                        } else {
+                            saveGithubToken(context, token)
+                            githubToken = token
+                            deviceAuth = null
+                            authStatus = ""
+                            Toast.makeText(
+                                context,
+                                "GitHub 账号授权成功",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                }
             },
         )
     }
 }
 
 @Composable
-private fun GitHubTokenDialog(
+private fun GitHubSettingsDialog(
     currentToken: String,
+    currentClientId: String,
     onDismiss: () -> Unit,
-    onSave: (String) -> Unit,
-    onClear: () -> Unit,
+    onSaveToken: (String) -> Unit,
+    onClearToken: () -> Unit,
+    onAuthorize: (String) -> Unit,
 ) {
     var token by remember(currentToken) { mutableStateOf(currentToken) }
+    var clientId by remember(currentClientId) { mutableStateOf(currentClientId) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("GitHub Token") },
+        title = { Text("GitHub 设置") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Token 只保存在本机，并使用 Android Keystore 加密。需要 Actions 读取权限。",
+                    "推荐使用 GitHub App 账号授权；现有 Fine-grained Token 仍可继续使用。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                OutlinedTextField(
+                    value = clientId,
+                    onValueChange = { clientId = it.trim() },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("GitHub App Client ID") },
+                    placeholder = { Text("Iv1.…") },
+                )
+                TextButton(
+                    onClick = { onAuthorize(clientId.trim()) },
+                    enabled = clientId.isNotBlank(),
+                ) {
+                    Text("使用 GitHub 账号授权")
+                }
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    label = { Text("Fine-grained token") },
+                    label = { Text("Fine-grained token（备用）") },
                     placeholder = { Text("github_pat_…") },
                     visualTransformation = PasswordVisualTransformation(),
                 )
@@ -422,19 +515,63 @@ private fun GitHubTokenDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(token.trim()) },
+                onClick = { onSaveToken(token.trim()) },
                 enabled = token.isNotBlank(),
             ) {
-                Text("保存")
+                Text("保存 Token")
             }
         },
         dismissButton = {
             Row {
                 if (currentToken.isNotBlank()) {
-                    TextButton(onClick = onClear) {
-                        Text("清除")
+                    TextButton(onClick = onClearToken) {
+                        Text("清除 Token")
                     }
                 }
+                TextButton(onClick = onDismiss) {
+                    Text("关闭")
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun GithubDeviceAuthDialog(
+    info: DeviceAuthInfo,
+    polling: Boolean,
+    status: String,
+    onDismiss: () -> Unit,
+    onOpenGithub: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("GitHub 账号授权") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("授权码")
+                Text(
+                    info.userCode,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    if (status.isBlank()) "复制授权码并打开 GitHub 完成授权。" else status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onOpenGithub,
+                enabled = !polling,
+            ) {
+                Text(if (polling) "等待授权…" else "复制并打开 GitHub")
+            }
+        },
+        dismissButton = {
+            if (!polling) {
                 TextButton(onClick = onDismiss) {
                     Text("取消")
                 }
@@ -1044,6 +1181,117 @@ private fun downloadArtifactZip(
     }
 }
 
+private data class DeviceAuthInfo(
+    val deviceCode: String,
+    val userCode: String,
+    val verificationUri: String,
+    val expiresInSeconds: Int,
+    val intervalSeconds: Int,
+)
+
+private fun requestGithubDeviceCode(clientId: String): DeviceAuthInfo? {
+    val response = postGithubForm(
+        "https://github.com/login/device/code",
+        mapOf("client_id" to clientId),
+    ) ?: return null
+
+    val deviceCode = response.optString("device_code")
+    val userCode = response.optString("user_code")
+    val verificationUri = response.optString("verification_uri")
+    if (deviceCode.isBlank() || userCode.isBlank() || verificationUri.isBlank()) return null
+
+    return DeviceAuthInfo(
+        deviceCode = deviceCode,
+        userCode = userCode,
+        verificationUri = verificationUri,
+        expiresInSeconds = response.optInt("expires_in", 900),
+        intervalSeconds = response.optInt("interval", 5).coerceAtLeast(5),
+    )
+}
+
+private suspend fun pollGithubDeviceToken(
+    clientId: String,
+    info: DeviceAuthInfo,
+): String? {
+    var interval = info.intervalSeconds
+    val deadline = System.currentTimeMillis() + info.expiresInSeconds * 1000L
+
+    while (System.currentTimeMillis() < deadline) {
+        delay(interval * 1000L)
+        val response = postGithubForm(
+            "https://github.com/login/oauth/access_token",
+            mapOf(
+                "client_id" to clientId,
+                "device_code" to info.deviceCode,
+                "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
+            ),
+        ) ?: return null
+
+        val accessToken = response.optString("access_token")
+        if (accessToken.isNotBlank()) return accessToken
+
+        when (response.optString("error")) {
+            "authorization_pending" -> Unit
+            "slow_down" -> interval += 5
+            "expired_token", "access_denied", "incorrect_client_credentials",
+            "incorrect_device_code", "device_flow_disabled" -> return null
+            else -> return null
+        }
+    }
+    return null
+}
+
+private fun postGithubForm(
+    url: String,
+    fields: Map<String, String>,
+): JSONObject? {
+    var connection: HttpURLConnection? = null
+    return try {
+        val body = fields.entries.joinToString("&") { entry ->
+            URLEncoder.encode(entry.key, "UTF-8") + "=" +
+                URLEncoder.encode(entry.value, "UTF-8")
+        }
+
+        connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 10_000
+            readTimeout = 30_000
+            doOutput = true
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            setRequestProperty("User-Agent", "YagaYHub")
+        }
+        connection.outputStream.use { output ->
+            output.write(body.toByteArray(Charsets.UTF_8))
+        }
+        if (connection.responseCode !in 200..299) return null
+        val text = connection.inputStream.bufferedReader().use { it.readText() }
+        JSONObject(text)
+    } catch (_: Exception) {
+        null
+    } finally {
+        connection?.disconnect()
+    }
+}
+
+private fun copyText(context: Context, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("GitHub authorization code", text))
+    Toast.makeText(context, "授权码已复制", Toast.LENGTH_SHORT).show()
+}
+
+private fun saveGithubClientId(context: Context, clientId: String) {
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(GITHUB_CLIENT_ID, clientId)
+        .apply()
+}
+
+private fun loadGithubClientId(context: Context): String =
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .getString(GITHUB_CLIENT_ID, "")
+        .orEmpty()
+
 private fun saveGithubToken(context: Context, token: String) {
     val cipher = Cipher.getInstance("AES/GCM/NoPadding")
     cipher.init(Cipher.ENCRYPT_MODE, getOrCreateTokenKey())
@@ -1107,6 +1355,7 @@ private fun getOrCreateTokenKey(): SecretKey {
 private const val TOKEN_PREFS = "github_secure"
 private const val TOKEN_IV = "token_iv"
 private const val TOKEN_DATA = "token_data"
+private const val GITHUB_CLIENT_ID = "github_client_id"
 private const val TOKEN_KEY_ALIAS = "YagaYHubGitHubToken"
 
 private fun getPackageInfoCompat(pm: PackageManager, packageName: String): PackageInfo? = runCatching {
