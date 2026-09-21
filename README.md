@@ -1,3 +1,9 @@
+## 1.7.0
+
+- 新增 GitHub 项目 ↔ ChatGPT 对话绑定：未绑定时从 YagaYHub 进入 YBrowser 选择具体 ChatGPT 聊天并回传 URL/标题；绑定后点击项目卡片的 ChatGPT 入口直接打开对应聊天。
+- ChatGPT 绑定以 `owner/repo` 为键本地保存；长按项目的 ChatGPT 入口可重新绑定。
+- ChatGPT 登录 Cookie 和账号状态仅保留在 YBrowser，YagaYHub 只保存聊天 URL 与标题。
+
 # YagaYHub
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
