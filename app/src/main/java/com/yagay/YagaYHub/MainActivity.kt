@@ -1,6 +1,7 @@
 package com.yagay.YagaYHub
 
 import android.content.ActivityNotFoundException
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
@@ -11,12 +12,22 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Bundle
+import android.provider.MediaStore
 import android.provider.Settings
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import android.widget.Toast
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -47,6 +58,7 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,6 +75,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +84,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -78,6 +92,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -153,12 +168,15 @@ private fun HubScreen(context: Context) {
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(AppFilter.INSTALLED) }
     var refreshKey by remember { mutableStateOf(0) }
+    var showSettings by remember { mutableStateOf(false) }
+    var githubToken by remember { mutableStateOf(loadGithubToken(context)) }
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(refreshKey) {
+    LaunchedEffect(refreshKey, githubToken) {
         val loadedApps = loadHubApps(context)
         apps = loadedApps
         apps = withContext(Dispatchers.IO) {
-            loadActionsStatuses(loadedApps)
+            loadActionsStatuses(loadedApps, githubToken)
         }
     }
 
@@ -204,6 +222,9 @@ private fun HubScreen(context: Context) {
                 }
                 TextButton(onClick = { openUrl(context, "https://www.google.com/") }) {
                     Text("浏览器")
+                }
+                TextButton(onClick = { showSettings = true }) {
+                    Text("设置")
                 }
                 IconButton(onClick = { refreshKey++ }) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
@@ -290,13 +311,32 @@ private fun HubScreen(context: Context) {
                                         runId == null || artifactId == null -> {
                                             Toast.makeText(context, "最新成功构建没有可下载 ZIP，或产物已过期", Toast.LENGTH_SHORT).show()
                                         }
+                                        githubToken.isBlank() -> {
+                                            Toast.makeText(context, "请先在设置中保存 GitHub Token", Toast.LENGTH_SHORT).show()
+                                            showSettings = true
+                                        }
                                         else -> {
-                                            openUrl(
-                                                context,
-                                                "https://github.com/yagay/" + repo +
-                                                    "/actions/runs/" + runId +
-                                                    "/artifacts/" + artifactId
-                                            )
+                                            scope.launch {
+                                                Toast.makeText(
+                                                    context,
+                                                    "开始下载 " + app.name + "…",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                                val result = withContext(Dispatchers.IO) {
+                                                    downloadArtifactZip(
+                                                        context = context,
+                                                        repo = repo,
+                                                        runId = runId,
+                                                        artifactId = artifactId,
+                                                        token = githubToken,
+                                                    )
+                                                }
+                                                Toast.makeText(
+                                                    context,
+                                                    result.message,
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            }
                                         }
                                     }
                                 },
@@ -307,6 +347,78 @@ private fun HubScreen(context: Context) {
             }
         }
     }
+
+    if (showSettings) {
+        GitHubTokenDialog(
+            currentToken = githubToken,
+            onDismiss = { showSettings = false },
+            onSave = { token ->
+                saveGithubToken(context, token)
+                githubToken = token
+                showSettings = false
+                Toast.makeText(context, "GitHub Token 已保存", Toast.LENGTH_SHORT).show()
+            },
+            onClear = {
+                clearGithubToken(context)
+                githubToken = ""
+                showSettings = false
+                Toast.makeText(context, "GitHub Token 已清除", Toast.LENGTH_SHORT).show()
+            },
+        )
+    }
+}
+
+@Composable
+private fun GitHubTokenDialog(
+    currentToken: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    var token by remember(currentToken) { mutableStateOf(currentToken) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("GitHub Token") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Token 只保存在本机，并使用 Android Keystore 加密。需要 Actions 读取权限。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Fine-grained token") },
+                    placeholder = { Text("github_pat_…") },
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(token.trim()) },
+                enabled = token.isNotBlank(),
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            Row {
+                if (currentToken.isNotBlank()) {
+                    TextButton(onClick = onClear) {
+                        Text("清除")
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("取消")
+                }
+            }
+        },
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -548,13 +660,16 @@ private data class LatestActionsInfo(
     val artifactSizeBytes: Long?,
 )
 
-private suspend fun loadActionsStatuses(apps: List<HubApp>): List<HubApp> = coroutineScope {
+private suspend fun loadActionsStatuses(
+    apps: List<HubApp>,
+    token: String,
+): List<HubApp> = coroutineScope {
     apps.map { app ->
         async {
             if (app.repo == null) {
                 app
             } else {
-                val info = fetchLatestActionsInfo(app.repo)
+                val info = fetchLatestActionsInfo(app.repo, token)
                 app.copy(
                     actionsStatus = info.status,
                     latestRunId = info.runId,
@@ -566,11 +681,12 @@ private suspend fun loadActionsStatuses(apps: List<HubApp>): List<HubApp> = coro
     }.awaitAll()
 }
 
-private fun fetchLatestActionsInfo(repo: String): LatestActionsInfo {
+private fun fetchLatestActionsInfo(repo: String, token: String): LatestActionsInfo {
     var connection: HttpURLConnection? = null
     return try {
         connection = githubGet(
-            "https://api.github.com/repos/yagay/" + repo + "/actions/runs?per_page=1"
+            "https://api.github.com/repos/yagay/" + repo + "/actions/runs?per_page=1",
+            token = token,
         )
         if (connection.responseCode !in 200..299) {
             return LatestActionsInfo(ActionsStatus.UNKNOWN, null, null, null)
@@ -588,7 +704,7 @@ private fun fetchLatestActionsInfo(repo: String): LatestActionsInfo {
 
         // 只处理最新一次 Actions：只有最新一次成功，才继续请求 artifact。
         val artifactInfo = if (status == ActionsStatus.SUCCESS && runId != null) {
-            fetchLatestArtifactInfo(repo, runId)
+            fetchLatestArtifactInfo(repo, runId, token)
         } else {
             null
         }
@@ -606,12 +722,17 @@ private fun fetchLatestActionsInfo(repo: String): LatestActionsInfo {
     }
 }
 
-private fun fetchLatestArtifactInfo(repo: String, runId: Long): Pair<Long, Long>? {
+private fun fetchLatestArtifactInfo(
+    repo: String,
+    runId: Long,
+    token: String,
+): Pair<Long, Long>? {
     var connection: HttpURLConnection? = null
     return try {
         connection = githubGet(
             "https://api.github.com/repos/yagay/" + repo +
-                "/actions/runs/" + runId + "/artifacts?per_page=100"
+                "/actions/runs/" + runId + "/artifacts?per_page=100",
+            token = token,
         )
         if (connection.responseCode !in 200..299) return null
 
@@ -657,15 +778,184 @@ private fun mapActionsStatus(run: JSONObject): ActionsStatus =
         else -> ActionsStatus.UNKNOWN
     }
 
-private fun githubGet(url: String): HttpURLConnection =
+private fun githubGet(
+    url: String,
+    token: String = "",
+    followRedirects: Boolean = true,
+): HttpURLConnection =
     (URL(url).openConnection() as HttpURLConnection).apply {
         requestMethod = "GET"
-        connectTimeout = 5000
-        readTimeout = 5000
+        connectTimeout = 10_000
+        readTimeout = 30_000
+        instanceFollowRedirects = followRedirects
         setRequestProperty("Accept", "application/vnd.github+json")
         setRequestProperty("User-Agent", "YagaYHub")
-        setRequestProperty("X-GitHub-Api-Version", "2026-03-10")
+        setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+        if (token.isNotBlank()) {
+            setRequestProperty("Authorization", "Bearer " + token)
+        }
     }
+
+private data class DownloadResult(
+    val success: Boolean,
+    val message: String,
+)
+
+private fun downloadArtifactZip(
+    context: Context,
+    repo: String,
+    runId: Long,
+    artifactId: Long,
+    token: String,
+): DownloadResult {
+    var apiConnection: HttpURLConnection? = null
+    var downloadConnection: HttpURLConnection? = null
+    var outputUri: Uri? = null
+
+    return try {
+        apiConnection = githubGet(
+            url = "https://api.github.com/repos/yagay/" + repo +
+                "/actions/artifacts/" + artifactId + "/zip",
+            token = token,
+            followRedirects = false,
+        )
+
+        val apiCode = apiConnection.responseCode
+        val streamConnection = when {
+            apiCode in 300..399 -> {
+                val location = apiConnection.getHeaderField("Location")
+                    ?: return DownloadResult(false, "GitHub 未返回 ZIP 下载地址")
+                (URL(location).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 10_000
+                    readTimeout = 60_000
+                    instanceFollowRedirects = true
+                }.also { downloadConnection = it }
+            }
+            apiCode in 200..299 -> apiConnection
+            apiCode == 401 || apiCode == 403 ->
+                return DownloadResult(false, "Token 无效或缺少 Actions 读取权限")
+            else ->
+                return DownloadResult(false, "下载失败：GitHub HTTP " + apiCode)
+        }
+
+        if (streamConnection !== apiConnection) {
+            val downloadCode = streamConnection.responseCode
+            if (downloadCode !in 200..299) {
+                return DownloadResult(false, "ZIP 下载失败：HTTP " + downloadCode)
+            }
+        }
+
+        val fileName = repo + "-" + runId + ".zip"
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+            put(MediaStore.Downloads.MIME_TYPE, "application/zip")
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/YagaYHub")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+
+        outputUri = context.contentResolver.insert(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            values,
+        ) ?: return DownloadResult(false, "无法创建下载文件")
+
+        context.contentResolver.openOutputStream(outputUri)?.use { output ->
+            streamConnection.inputStream.use { input ->
+                input.copyTo(output)
+            }
+        } ?: return DownloadResult(false, "无法写入下载文件")
+
+        context.contentResolver.update(
+            outputUri,
+            ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+            null,
+            null,
+        )
+
+        DownloadResult(
+            true,
+            "已保存到 Downloads/YagaYHub/" + fileName,
+        )
+    } catch (e: Exception) {
+        outputUri?.let { uri ->
+            runCatching { context.contentResolver.delete(uri, null, null) }
+        }
+        DownloadResult(
+            false,
+            "下载失败：" + (e.message ?: "未知错误"),
+        )
+    } finally {
+        if (downloadConnection !== apiConnection) {
+            downloadConnection?.disconnect()
+        }
+        apiConnection?.disconnect()
+    }
+}
+
+private fun saveGithubToken(context: Context, token: String) {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, getOrCreateTokenKey())
+    val encrypted = cipher.doFinal(token.toByteArray(Charsets.UTF_8))
+
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(TOKEN_IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+        .putString(TOKEN_DATA, Base64.encodeToString(encrypted, Base64.NO_WRAP))
+        .apply()
+}
+
+private fun loadGithubToken(context: Context): String {
+    return runCatching {
+        val prefs = context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        val iv = prefs.getString(TOKEN_IV, null) ?: return ""
+        val encrypted = prefs.getString(TOKEN_DATA, null) ?: return ""
+
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(
+            Cipher.DECRYPT_MODE,
+            getOrCreateTokenKey(),
+            GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP)),
+        )
+        String(
+            cipher.doFinal(Base64.decode(encrypted, Base64.NO_WRAP)),
+            Charsets.UTF_8,
+        )
+    }.getOrElse { "" }
+}
+
+private fun clearGithubToken(context: Context) {
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .remove(TOKEN_IV)
+        .remove(TOKEN_DATA)
+        .apply()
+}
+
+private fun getOrCreateTokenKey(): SecretKey {
+    val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    (keyStore.getKey(TOKEN_KEY_ALIAS, null) as? SecretKey)?.let { return it }
+
+    val generator = KeyGenerator.getInstance(
+        KeyProperties.KEY_ALGORITHM_AES,
+        "AndroidKeyStore",
+    )
+    generator.init(
+        KeyGenParameterSpec.Builder(
+            TOKEN_KEY_ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+        )
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(256)
+            .build()
+    )
+    return generator.generateKey()
+}
+
+private const val TOKEN_PREFS = "github_secure"
+private const val TOKEN_IV = "token_iv"
+private const val TOKEN_DATA = "token_data"
+private const val TOKEN_KEY_ALIAS = "YagaYHubGitHubToken"
 
 private fun getPackageInfoCompat(pm: PackageManager, packageName: String): PackageInfo? = runCatching {
     if (Build.VERSION.SDK_INT >= 33) {
