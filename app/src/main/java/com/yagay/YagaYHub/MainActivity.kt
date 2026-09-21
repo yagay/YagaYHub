@@ -236,10 +236,38 @@ class MainActivity : ComponentActivity() {
 
 class ChatBindingCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action != ACTION_REMOVE_CHATGPT_BINDING) return
-        val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
-        if (url.isBlank()) return
-        removeChatBinding(context, url)
+        when (intent?.action) {
+            ACTION_REMOVE_CHATGPT_BINDING -> {
+                val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
+                if (url.isBlank()) return
+                removeChatBinding(context, url)
+            }
+            ACTION_CHATGPT_BOUND -> {
+                val repo = intent.getStringExtra(EXTRA_CHAT_BIND_REPO).orEmpty()
+                val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
+                val title = intent.getStringExtra(EXTRA_CHAT_BIND_TITLE)
+                    .orEmpty()
+                    .ifBlank { "ChatGPT" }
+                if (
+                    repo.isBlank() ||
+                    url.isBlank() ||
+                    !isBindableChatGptUrl(url)
+                ) {
+                    return
+                }
+                saveChatBinding(
+                    context = context,
+                    repoKey = repo,
+                    title = title,
+                    url = url,
+                )
+                Toast.makeText(
+                    context,
+                    "已绑定 ChatGPT · " + repo.substringAfter('/'),
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
     }
 }
 
@@ -1001,10 +1029,9 @@ private fun HubScreen(
                                             TextButton(
                                                 onClick = {
                                                     bindingListApp = null
-                                                    openUrl(
+                                                    openChatPopup(
                                                         context = context,
                                                         url = binding.url,
-                                                        reuseExisting = true,
                                                         bindingRepoKey = binding.repoKey,
                                                         bindingProject = app.name,
                                                         bindingTitle = binding.title,
@@ -3753,6 +3780,10 @@ private const val YBROWSER_CHAT_BINDING_REMOVE_ACTION =
     "com.yagay.YBrowser.action.CHATGPT_BINDING_REMOVE"
 private const val YBROWSER_SELECT_CHAT_ACTION =
     "com.yagay.YBrowser.action.SELECT_CHATGPT_CHAT"
+private const val YBROWSER_OPEN_POPUP_ACTION =
+    "com.yagay.YBrowser.action.OPEN_POPUP"
+private const val YBROWSER_SELECT_CHAT_POPUP_ACTION =
+    "com.yagay.YBrowser.action.SELECT_CHATGPT_CHAT_POPUP"
 private const val EXTRA_CHAT_BIND_REPO = "com.yagay.YBrowser.extra.BIND_REPO"
 private const val EXTRA_CHAT_BIND_PROJECT = "com.yagay.YBrowser.extra.BIND_PROJECT"
 private const val EXTRA_CHAT_BIND_URL = "com.yagay.YBrowser.extra.BIND_URL"
@@ -4000,7 +4031,7 @@ private fun startChatGptBinding(
     currentBinding: ChatBinding?,
 ) {
     val repo = app.repo ?: return
-    val intent = Intent(YBROWSER_SELECT_CHAT_ACTION).apply {
+    val intent = Intent(YBROWSER_SELECT_CHAT_POPUP_ACTION).apply {
         setPackage(YBROWSER_PACKAGE)
         putExtra(
             EXTRA_CHAT_BIND_REPO,
@@ -4011,7 +4042,6 @@ private fun startChatGptBinding(
             YBROWSER_EXTRA_URL,
             currentBinding?.url ?: "https://chatgpt.com/",
         )
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     try {
         context.startActivity(intent)
@@ -4054,6 +4084,33 @@ private fun syncChatBindingToYBrowser(
         )
     }
     runCatching { context.startActivity(intent) }
+}
+
+private fun openChatPopup(
+    context: Context,
+    url: String,
+    bindingRepoKey: String? = null,
+    bindingProject: String? = null,
+    bindingTitle: String? = null,
+) {
+    val intent = Intent(YBROWSER_OPEN_POPUP_ACTION).apply {
+        setPackage(YBROWSER_PACKAGE)
+        putExtra(YBROWSER_EXTRA_URL, url)
+        if (!bindingRepoKey.isNullOrBlank()) {
+            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
+            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
+            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
+        }
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(
+            context,
+            "请先安装或更新 YBrowser",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
 }
 
 private fun openUrl(
