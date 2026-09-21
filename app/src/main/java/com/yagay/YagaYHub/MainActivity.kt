@@ -44,6 +44,7 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Instant
+import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.zip.ZipInputStream
@@ -1526,6 +1527,8 @@ private fun AppListEntry(
     onActionsClick: () -> Unit,
     onArtifactClick: () -> Unit,
 ) {
+    val hasNewerActions = hasNewerActionsBuild(app)
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1598,7 +1601,16 @@ private fun AppListEntry(
                     Text(
                         "Actions   " + actionTime,
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (hasNewerActions) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        fontWeight = if (hasNewerActions) {
+                            FontWeight.SemiBold
+                        } else {
+                            FontWeight.Normal
+                        },
                         maxLines = 2,
                     )
                 }
@@ -1692,6 +1704,8 @@ private fun AppEntry(
     onActionsClick: () -> Unit,
     onArtifactClick: () -> Unit,
 ) {
+    val hasNewerActions = hasNewerActionsBuild(app)
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1835,7 +1849,16 @@ private fun AppEntry(
                 Text(
                     "Actions " + actionTime,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (hasNewerActions) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    fontWeight = if (hasNewerActions) {
+                        FontWeight.SemiBold
+                    } else {
+                        FontWeight.Normal
+                    },
                     maxLines = 1,
                 )
             }
@@ -2175,6 +2198,18 @@ private fun fetchLatestArtifactInfo(
 
 private val actionsTimeFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+
+private fun hasNewerActionsBuild(app: HubApp): Boolean {
+    if (!app.installed || app.repoOnly) return false
+    val installedTime = app.installedUpdateTime ?: return false
+    val actionsTime = app.latestActionTime ?: return false
+
+    return runCatching {
+        val installed = LocalDateTime.parse(installedTime, actionsTimeFormatter)
+        val actions = LocalDateTime.parse(actionsTime, actionsTimeFormatter)
+        actions.isAfter(installed)
+    }.getOrDefault(false)
+}
 
 private fun formatLocalTime(epochMillis: Long): String =
     Instant.ofEpochMilli(epochMillis)
