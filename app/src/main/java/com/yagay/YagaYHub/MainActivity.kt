@@ -62,6 +62,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.weight
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -173,6 +176,12 @@ private enum class AppFilter(val label: String) {
     ALL("全部"), INSTALLED("已安装"), NOT_INSTALLED("未安装"), GITHUB("GitHub")
 }
 
+private enum class LayoutMode(val label: String) {
+    LIST("列表"),
+    GRID("网格"),
+}
+
+
 private val knownProjects = listOf(
     ProjectSpec("FloatLens", "com.yagay.floatlens", "FloatLens", "悬浮识别、截图与屏幕工具"),
     ProjectSpec("List Cleaner", "com.yagay.ListCleaner", "ListCleaner", "分享面板、组件与列表清理"),
@@ -204,6 +213,7 @@ private fun HubScreen(context: Context) {
     var downloadTreeUri by remember { mutableStateOf(loadDownloadDirectoryUri(context)) }
     var rootCleanupEnabled by remember { mutableStateOf(loadRootCleanupEnabled(context)) }
     var rootStatus by remember { mutableStateOf(RootStatus.NOT_CHECKED) }
+    var layoutMode by remember { mutableStateOf(loadLayoutMode(context)) }
     var pendingInstallApk by remember { mutableStateOf<ExtractedApk?>(null) }
     val scope = rememberCoroutineScope()
     val directoryPicker = rememberLauncherForActivityResult(
@@ -315,6 +325,18 @@ private fun HubScreen(context: Context) {
                 TextButton(onClick = { showSettings = true }) {
                     Text("设置")
                 }
+                TextButton(
+                    onClick = {
+                        layoutMode = if (layoutMode == LayoutMode.LIST) {
+                            LayoutMode.GRID
+                        } else {
+                            LayoutMode.LIST
+                        }
+                        saveLayoutMode(context, layoutMode)
+                    }
+                ) {
+                    Text(layoutMode.label)
+                }
                 IconButton(onClick = { refreshKey++ }) {
                     Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
                 }
@@ -359,110 +381,144 @@ private fun HubScreen(context: Context) {
                     Text("没有匹配的 App", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
-                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                    val columns = if (maxWidth < 430.dp) 4 else 5
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(columns),
+                val itemContent: @Composable (HubApp) -> Unit = { app ->
+                    val onClick = {
+                        when {
+                            app.launchIntent != null -> openApp(context, app)
+                            app.repo != null -> openUrl(
+                                context,
+                                "https://github.com/" + app.repoOwner + "/" + app.repo
+                            )
+                            app.installed -> openAppDetails(context, app.packageName)
+                        }
+                    }
+                    val onLongClick = {
+                        when {
+                            app.installed -> openAppDetails(context, app.packageName)
+                            app.repo != null -> openUrl(
+                                context,
+                                "https://github.com/" + app.repoOwner + "/" + app.repo
+                            )
+                        }
+                    }
+                    val onActionsClick = {
+                        app.repo?.let { repo ->
+                            openUrl(
+                                context,
+                                "https://github.com/" + app.repoOwner + "/" + repo + "/actions"
+                            )
+                        }
+                    }
+                    val onArtifactClick = {
+                        val repo = app.repo
+                        val runId = app.latestRunId
+                        val artifactId = app.latestArtifactId
+                        when {
+                            repo == null -> {
+                                Toast.makeText(context, "未配置 GitHub 仓库", Toast.LENGTH_SHORT).show()
+                            }
+                            app.actionsStatus != ActionsStatus.SUCCESS -> {
+                                Toast.makeText(context, "最新一次 Actions 未成功，不抓取 ZIP", Toast.LENGTH_SHORT).show()
+                            }
+                            runId == null || artifactId == null -> {
+                                Toast.makeText(context, "最新成功构建没有可下载 ZIP，或产物已过期", Toast.LENGTH_SHORT).show()
+                            }
+                            githubToken.isBlank() -> {
+                                Toast.makeText(context, "请先在设置中保存 GitHub Token", Toast.LENGTH_SHORT).show()
+                                showSettings = true
+                            }
+                            else -> {
+                                scope.launch {
+                                    Toast.makeText(
+                                        context,
+                                        "开始下载 " + app.name + "…",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    val result = withContext(Dispatchers.IO) {
+                                        downloadArtifactZip(
+                                            context = context,
+                                            owner = app.repoOwner,
+                                            repo = repo,
+                                            runId = runId,
+                                            artifactId = artifactId,
+                                            token = githubToken,
+                                            destinationTreeUri = downloadTreeUri,
+                                            rootEnhancedCleanup = rootCleanupEnabled &&
+                                                rootStatus == RootStatus.AVAILABLE,
+                                        )
+                                    }
+                                    Toast.makeText(
+                                        context,
+                                        result.message,
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    if (result.success && result.extractedApks.isNotEmpty()) {
+                                        val primaryApk = choosePrimaryApk(result.extractedApks)
+                                        if (
+                                            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                            !context.packageManager.canRequestPackageInstalls()
+                                        ) {
+                                            pendingInstallApk = primaryApk
+                                            unknownSourcesLauncher.launch(
+                                                Intent(
+                                                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                                    Uri.parse("package:" + context.packageName),
+                                                )
+                                            )
+                                        } else {
+                                            openExtractedApk(context, primaryApk)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (layoutMode == LayoutMode.LIST) {
+                        AppListEntry(
+                            app = app,
+                            onClick = onClick,
+                            onLongClick = onLongClick,
+                            onActionsClick = onActionsClick,
+                            onArtifactClick = onArtifactClick,
+                        )
+                    } else {
+                        AppEntry(
+                            app = app,
+                            onClick = onClick,
+                            onLongClick = onLongClick,
+                            onActionsClick = onActionsClick,
+                            onArtifactClick = onArtifactClick,
+                        )
+                    }
+                }
+
+                if (layoutMode == LayoutMode.LIST) {
+                    LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        items(visibleApps, key = { it.packageName }) { app ->
-                            AppEntry(
-                                app = app,
-                                onClick = {
-                                    when {
-                                        app.launchIntent != null -> openApp(context, app)
-                                        app.repo != null -> openUrl(
-                                            context,
-                                            "https://github.com/" + app.repoOwner + "/" + app.repo
-                                        )
-                                        app.installed -> openAppDetails(context, app.packageName)
-                                    }
-                                },
-                                onLongClick = {
-                                    when {
-                                        app.installed -> openAppDetails(context, app.packageName)
-                                        app.repo != null -> openUrl(
-                                            context,
-                                            "https://github.com/" + app.repoOwner + "/" + app.repo
-                                        )
-                                    }
-                                },
-                                onActionsClick = {
-                                    app.repo?.let { repo ->
-                                        openUrl(
-                                            context,
-                                            "https://github.com/" + app.repoOwner + "/" + repo + "/actions"
-                                        )
-                                    }
-                                },
-                                onArtifactClick = {
-                                    val repo = app.repo
-                                    val runId = app.latestRunId
-                                    val artifactId = app.latestArtifactId
-                                    when {
-                                        repo == null -> {
-                                            Toast.makeText(context, "未配置 GitHub 仓库", Toast.LENGTH_SHORT).show()
-                                        }
-                                        app.actionsStatus != ActionsStatus.SUCCESS -> {
-                                            Toast.makeText(context, "最新一次 Actions 未成功，不抓取 ZIP", Toast.LENGTH_SHORT).show()
-                                        }
-                                        runId == null || artifactId == null -> {
-                                            Toast.makeText(context, "最新成功构建没有可下载 ZIP，或产物已过期", Toast.LENGTH_SHORT).show()
-                                        }
-                                        githubToken.isBlank() -> {
-                                            Toast.makeText(context, "请先在设置中保存 GitHub Token", Toast.LENGTH_SHORT).show()
-                                            showSettings = true
-                                        }
-                                        else -> {
-                                            scope.launch {
-                                                Toast.makeText(
-                                                    context,
-                                                    "开始下载 " + app.name + "…",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                                val result = withContext(Dispatchers.IO) {
-                                                    downloadArtifactZip(
-                                                        context = context,
-                                                        owner = app.repoOwner,
-                                                        repo = repo,
-                                                        runId = runId,
-                                                        artifactId = artifactId,
-                                                        token = githubToken,
-                                                        destinationTreeUri = downloadTreeUri,
-                                                        rootEnhancedCleanup = rootCleanupEnabled &&
-                                                            rootStatus == RootStatus.AVAILABLE,
-                                                    )
-                                                }
-                                                Toast.makeText(
-                                                    context,
-                                                    result.message,
-                                                    Toast.LENGTH_LONG
-                                                ).show()
-                                                if (result.success && result.extractedApks.isNotEmpty()) {
-                                                    val primaryApk = choosePrimaryApk(result.extractedApks)
-                                                    if (
-                                                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                                                        !context.packageManager.canRequestPackageInstalls()
-                                                    ) {
-                                                        pendingInstallApk = primaryApk
-                                                        unknownSourcesLauncher.launch(
-                                                            Intent(
-                                                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                                                Uri.parse("package:" + context.packageName),
-                                                            )
-                                                        )
-                                                    } else {
-                                                        openExtractedApk(context, primaryApk)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                            )
+                        lazyItems(
+                            items = visibleApps,
+                            key = { it.packageName },
+                        ) { app ->
+                            itemContent(app)
+                        }
+                    }
+                } else {
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val columns = if (maxWidth < 430.dp) 4 else 5
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(columns),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            items(visibleApps, key = { it.packageName }) { app ->
+                                itemContent(app)
+                            }
                         }
                     }
                 }
@@ -1233,7 +1289,7 @@ private fun fetchLatestArtifactInfo(
 }
 
 private val actionsTimeFormatter: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("MM-dd HH:mm")
+    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
 private fun formatLocalTime(epochMillis: Long): String =
     Instant.ofEpochMilli(epochMillis)
@@ -2050,12 +2106,27 @@ private fun getOrCreateTokenKey(): SecretKey {
     return generator.generateKey()
 }
 
+private fun saveLayoutMode(context: Context, mode: LayoutMode) {
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(LAYOUT_MODE, mode.name)
+        .apply()
+}
+
+private fun loadLayoutMode(context: Context): LayoutMode {
+    val saved = context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .getString(LAYOUT_MODE, LayoutMode.LIST.name)
+    return runCatching { LayoutMode.valueOf(saved.orEmpty()) }
+        .getOrDefault(LayoutMode.LIST)
+}
+
 private const val TOKEN_PREFS = "github_secure"
 private const val TOKEN_IV = "token_iv"
 private const val TOKEN_DATA = "token_data"
 private const val GITHUB_CLIENT_ID = "github_client_id"
 private const val DOWNLOAD_TREE_URI = "download_tree_uri"
 private const val ROOT_CLEANUP_ENABLED = "root_cleanup_enabled"
+private const val LAYOUT_MODE = "layout_mode"
 private const val TOKEN_KEY_ALIAS = "YagaYHubGitHubToken"
 
 private fun getPackageInfoCompat(pm: PackageManager, packageName: String): PackageInfo? = runCatching {
