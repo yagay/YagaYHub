@@ -204,6 +204,7 @@ private fun HubScreen(context: Context) {
     var downloadTreeUri by remember { mutableStateOf(loadDownloadDirectoryUri(context)) }
     var rootCleanupEnabled by remember { mutableStateOf(loadRootCleanupEnabled(context)) }
     var rootStatus by remember { mutableStateOf(RootStatus.NOT_CHECKED) }
+    var pendingInstallApk by remember { mutableStateOf<ExtractedApk?>(null) }
     val scope = rememberCoroutineScope()
     val directoryPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -219,6 +220,27 @@ private fun HubScreen(context: Context) {
             saveDownloadDirectoryUri(context, uri.toString())
             downloadTreeUri = uri.toString()
             Toast.makeText(context, "下载目录已更新", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val unknownSourcesLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        val pending = pendingInstallApk
+        if (pending != null) {
+            if (
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                context.packageManager.canRequestPackageInstalls()
+            ) {
+                openExtractedApk(context, pending)
+                pendingInstallApk = null
+            } else {
+                Toast.makeText(
+                    context,
+                    "未授予安装未知应用权限，APK 已保留在下载目录",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
         }
     }
 
@@ -420,10 +442,21 @@ private fun HubScreen(context: Context) {
                                                     Toast.LENGTH_LONG
                                                 ).show()
                                                 if (result.success && result.extractedApks.isNotEmpty()) {
-                                                    openExtractedApk(
-                                                        context,
-                                                        choosePrimaryApk(result.extractedApks),
-                                                    )
+                                                    val primaryApk = choosePrimaryApk(result.extractedApks)
+                                                    if (
+                                                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                                        !context.packageManager.canRequestPackageInstalls()
+                                                    ) {
+                                                        pendingInstallApk = primaryApk
+                                                        unknownSourcesLauncher.launch(
+                                                            Intent(
+                                                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                                                Uri.parse("package:" + context.packageName),
+                                                            )
+                                                        )
+                                                    } else {
+                                                        openExtractedApk(context, primaryApk)
+                                                    }
                                                 }
                                             }
                                         }
@@ -1503,25 +1536,6 @@ private fun choosePrimaryApk(apks: List<ExtractedApk>): ExtractedApk {
 }
 
 private fun openExtractedApk(context: Context, apk: ExtractedApk) {
-    if (
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-        !context.packageManager.canRequestPackageInstalls()
-    ) {
-        val settingsIntent = Intent(
-            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-            Uri.parse("package:" + context.packageName),
-        ).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        runCatching { context.startActivity(settingsIntent) }
-        Toast.makeText(
-            context,
-            "请允许 YagaYHub 安装未知应用；授权后再次点击下载即可直接打开 APK",
-            Toast.LENGTH_LONG,
-        ).show()
-        return
-    }
-
     val installIntent = Intent(Intent.ACTION_VIEW).apply {
         setDataAndType(apk.uri, APK_MIME_TYPE)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
