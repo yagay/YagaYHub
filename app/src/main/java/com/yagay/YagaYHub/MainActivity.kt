@@ -33,6 +33,7 @@ import java.security.KeyStore
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.zip.ZipInputStream
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -418,6 +419,12 @@ private fun HubScreen(context: Context) {
                                                     result.message,
                                                     Toast.LENGTH_LONG
                                                 ).show()
+                                                if (result.success && result.extractedApks.isNotEmpty()) {
+                                                    openExtractedApk(
+                                                        context,
+                                                        choosePrimaryApk(result.extractedApks),
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -1254,9 +1261,15 @@ private fun githubGet(
         }
     }
 
+private data class ExtractedApk(
+    val name: String,
+    val uri: Uri,
+)
+
 private data class DownloadResult(
     val success: Boolean,
     val message: String,
+    val extractedApks: List<ExtractedApk> = emptyList(),
 )
 
 private fun downloadArtifactZip(
@@ -1345,6 +1358,13 @@ private fun downloadArtifactZip(
 
         destination.finish?.invoke()
 
+        val extractedApks = extractApksFromZip(
+            context = context,
+            zipUri = destination.uri,
+            destinationTreeUri = destinationTreeUri,
+            rootDirectory = if (rootEnhancedCleanup) rootDirectory else null,
+        )
+
         if (rootCleanupApplied && rootDirectory != null) {
             rootCleanupDownloadDirectory(
                 context = context,
@@ -1355,9 +1375,20 @@ private fun downloadArtifactZip(
         }
 
         DownloadResult(
-            true,
-            "已保存到 " + destination.displayPath +
-                if (rootCleanupApplied) " · Root 清理完成" else "",
+            success = true,
+            message = buildString {
+                append("已保存到 ")
+                append(destination.displayPath)
+                if (extractedApks.isNotEmpty()) {
+                    append(" · 已解压 ")
+                    append(extractedApks.size)
+                    append(" 个 APK")
+                } else {
+                    append(" · ZIP 内未发现 APK")
+                }
+                if (rootCleanupApplied) append(" · Root 清理完成")
+            },
+            extractedApks = extractedApks,
         )
     } catch (e: Exception) {
         outputUri?.let { uri ->
@@ -1374,6 +1405,142 @@ private fun downloadArtifactZip(
         apiConnection?.disconnect()
     }
 }
+
+private fun extractApksFromZip(
+    context: Context,
+    zipUri: Uri,
+    destinationTreeUri: String,
+    rootDirectory: File?,
+): List<ExtractedApk> {
+    val resolver = context.contentResolver
+    val extracted = mutableListOf<ExtractedApk>()
+    val seenNames = mutableSetOf<String>()
+
+    val input = resolver.openInputStream(zipUri) ?: return emptyList()
+    ZipInputStream(input.buffered()).use { zip ->
+        var entry = zip.nextEntry
+        while (entry != null) {
+            if (!entry.isDirectory && entry.name.endsWith(".apk", ignoreCase = true)) {
+                val rawName = entry.name.substringAfterLast('/').substringAfterLast('\\')
+                val safeName = sanitizeApkFileName(rawName)
+                if (safeName.isNotBlank() && seenNames.add(safeName.lowercase())) {
+                    if (rootDirectory != null) {
+                        runRootCommand(
+                            "rm -f -- " + shellQuote(File(rootDirectory, safeName).absolutePath)
+                        )
+                        runRootCommand("sync")
+                    }
+
+                    val destination = if (destinationTreeUri.isBlank()) {
+                        prepareDefaultDownloadDestination(
+                            context = context,
+                            fileName = safeName,
+                            mimeType = APK_MIME_TYPE,
+                        )
+                    } else {
+                        prepareTreeDownloadDestination(
+                            context = context,
+                            treeUriString = destinationTreeUri,
+                            fileName = safeName,
+                            mimeType = APK_MIME_TYPE,
+                        )
+                    }
+
+                    if (destination != null) {
+                        val written = runCatching {
+                            resolver.openOutputStream(destination.uri, "w")?.use { output ->
+                                zip.copyTo(output)
+                            } ?: error("无法写入 APK")
+                            destination.finish?.invoke()
+                            true
+                        }.getOrElse {
+                            runCatching { resolver.delete(destination.uri, null, null) }
+                            false
+                        }
+
+                        if (written) {
+                            extracted += ExtractedApk(
+                                name = safeName,
+                                uri = destination.uri,
+                            )
+                        }
+                    }
+                }
+            }
+            zip.closeEntry()
+            entry = zip.nextEntry
+        }
+    }
+
+    if (rootDirectory != null) {
+        clearOwnDownloadCache(context)
+        runRootCommand("sync")
+    }
+    return extracted
+}
+
+private fun sanitizeApkFileName(name: String): String {
+    val cleaned = name
+        .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        .trim()
+        .take(180)
+    return if (cleaned.endsWith(".apk", ignoreCase = true)) cleaned else ""
+}
+
+private fun choosePrimaryApk(apks: List<ExtractedApk>): ExtractedApk {
+    fun score(name: String): Int {
+        val n = name.lowercase()
+        var score = 0
+        if ("release" in n) score += 100
+        if ("universal" in n) score += 90
+        if (n == "base.apk") score += 80
+        if (n.startsWith("app-")) score += 60
+        if ("debug" in n) score -= 20
+        if ("split_" in n || "config." in n) score -= 100
+        return score
+    }
+    return apks.maxByOrNull { score(it.name) } ?: apks.first()
+}
+
+private fun openExtractedApk(context: Context, apk: ExtractedApk) {
+    if (
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+        !context.packageManager.canRequestPackageInstalls()
+    ) {
+        val settingsIntent = Intent(
+            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            Uri.parse("package:" + context.packageName),
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(settingsIntent) }
+        Toast.makeText(
+            context,
+            "请允许 YagaYHub 安装未知应用；授权后再次点击下载即可直接打开 APK",
+            Toast.LENGTH_LONG,
+        ).show()
+        return
+    }
+
+    val installIntent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(apk.uri, APK_MIME_TYPE)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        clipData = ClipData.newRawUri(apk.name, apk.uri)
+    }
+
+    runCatching {
+        context.startActivity(installIntent)
+    }.onFailure {
+        Toast.makeText(
+            context,
+            "APK 已解压，但无法打开系统安装器：" + apk.name,
+            Toast.LENGTH_LONG,
+        ).show()
+    }
+}
+
+private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
 
 private fun hasRootAccess(): Boolean {
     val result = runRootCommand("id")
@@ -1575,6 +1742,7 @@ private fun deleteTreeDocumentsByName(
 private fun prepareDefaultDownloadDestination(
     context: Context,
     fileName: String,
+    mimeType: String = "application/zip",
 ): DownloadDestination? {
     val resolver = context.contentResolver
     val relativePath = Environment.DIRECTORY_DOWNLOADS + "/YagaYHub/"
@@ -1588,7 +1756,7 @@ private fun prepareDefaultDownloadDestination(
 
     val values = ContentValues().apply {
         put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-        put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+        put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
         put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
         put(MediaStore.MediaColumns.IS_PENDING, 1)
     }
@@ -1624,6 +1792,7 @@ private fun prepareTreeDownloadDestination(
     context: Context,
     treeUriString: String,
     fileName: String,
+    mimeType: String = "application/zip",
 ): DownloadDestination? {
     val resolver = context.contentResolver
     val treeUri = runCatching { Uri.parse(treeUriString) }.getOrNull() ?: return null
@@ -1651,7 +1820,7 @@ private fun prepareTreeDownloadDestination(
         DocumentsContract.createDocument(
             resolver,
             parentDocumentUri,
-            "application/zip",
+            mimeType,
             fileName,
         )
     }.getOrNull() ?: return null
