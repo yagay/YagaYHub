@@ -446,6 +446,8 @@ private data class HubApp(
     val actionsStatus: ActionsStatus = ActionsStatus.NONE,
     val latestRunId: Long? = null,
     val latestActionTime: String? = null,
+    val repoUpdatedTime: String? = null,
+    val repoPushedTime: String? = null,
     val latestArtifactId: Long? = null,
     val latestArtifactSizeBytes: Long? = null,
 )
@@ -457,6 +459,20 @@ private enum class AppFilter(val label: String) {
 private enum class LayoutMode(val label: String) {
     LIST("列表"),
     GRID("网格"),
+}
+
+private enum class AppSortMode(
+    val label: String,
+    val defaultAscending: Boolean,
+) {
+    DEFAULT("默认顺序", true),
+    ACTIONS_TIME("Actions 更新时间", false),
+    PROJECT_TIME("项目更新时间", false),
+    PUSH_TIME("代码更新时间", false),
+    NAME("名称", true),
+    INSTALLED_TIME("本机更新时间", false),
+    AI_COUNT("AI 绑定数量", false),
+    AI_RECENT("AI 最近绑定", false),
 }
 
 private data class ChatBinding(
@@ -2522,6 +2538,8 @@ private data class GithubRepository(
     val name: String,
     val description: String?,
     val isPrivate: Boolean,
+    val updatedTime: String?,
+    val pushedTime: String?,
 )
 
 private fun fetchOwnedRepositories(token: String): List<GithubRepository> {
@@ -2553,6 +2571,12 @@ private fun fetchOwnedRepositories(token: String): List<GithubRepository> {
                         description = item.optString("description")
                             .takeIf { it.isNotBlank() && it != "null" },
                         isPrivate = item.optBoolean("private", false),
+                        updatedTime = formatActionsTime(
+                            item.optString("updated_at"),
+                        ),
+                        pushedTime = formatActionsTime(
+                            item.optString("pushed_at"),
+                        ),
                     )
                 }
 
@@ -2589,7 +2613,22 @@ private fun mergeGithubRepositories(
 
     repositories.forEach { repository ->
         val key = (repository.owner + "/" + repository.name).lowercase()
-        if (key in existingRepos) return@forEach
+        val existingRepoIndex = result.indexOfFirst { app ->
+            val repo = app.repo ?: return@indexOfFirst false
+            (app.repoOwner + "/" + repo).lowercase() == key
+        }
+
+        if (existingRepoIndex >= 0) {
+            val app = result[existingRepoIndex]
+            result[existingRepoIndex] = app.copy(
+                description = repository.description ?: app.description,
+                repoUpdatedTime = repository.updatedTime,
+                repoPushedTime = repository.pushedTime,
+                actionsStatus = ActionsStatus.LOADING,
+            )
+            existingRepos += key
+            return@forEach
+        }
 
         val matchingAppIndex = result.indexOfFirst { app ->
             app.repo == null && (
@@ -2605,6 +2644,8 @@ private fun mergeGithubRepositories(
                 repo = repository.name,
                 repoOwner = repository.owner,
                 description = repository.description ?: app.description,
+                repoUpdatedTime = repository.updatedTime,
+                repoPushedTime = repository.pushedTime,
                 actionsStatus = ActionsStatus.LOADING,
             )
         } else {
@@ -2621,6 +2662,8 @@ private fun mergeGithubRepositories(
                 icon = null,
                 repoOnly = true,
                 actionsStatus = ActionsStatus.LOADING,
+                repoUpdatedTime = repository.updatedTime,
+                repoPushedTime = repository.pushedTime,
             )
         }
         existingRepos += key
