@@ -922,8 +922,9 @@ private fun HubScreen(
                             onActionsClick = onActionsClick,
                             onArtifactClick = onArtifactClick,
                             chatBinding = chatBinding,
+                            chatBindingCount = chatBindings.size,
                             onChatClick = onChatClick,
-                            onChatLongClick = onChatLongClick,
+                            onBindClick = onBindClick,
                         )
                     }
                 }
@@ -1966,8 +1967,9 @@ private fun AppListEntry(
     onActionsClick: () -> Unit,
     onArtifactClick: () -> Unit,
     chatBinding: ChatBinding?,
+    chatBindingCount: Int,
     onChatClick: () -> Unit,
-    onChatLongClick: () -> Unit,
+    onBindClick: () -> Unit,
 ) {
     val hasNewerActions = hasNewerActionsBuild(app)
 
@@ -2149,26 +2151,39 @@ private fun AppListEntry(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .combinedClickable(
-                                onClick = onChatClick,
-                                onLongClick = onChatLongClick,
-                            )
+                            .clickable(onClick = onChatClick)
                             .padding(horizontal = 6.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            if (chatBinding != null) "ChatGPT" else "绑定 GPT",
+                            "GPT " + chatBindingCount,
                             style = MaterialTheme.typography.labelMedium,
                             color = if (chatBinding != null) {
                                 MaterialTheme.colorScheme.primary
                             } else {
-                                MaterialTheme.colorScheme.secondary
+                                MaterialTheme.colorScheme.onSurfaceVariant
                             },
                             fontWeight = if (chatBinding != null) {
                                 FontWeight.SemiBold
                             } else {
                                 FontWeight.Normal
                             },
+                            maxLines = 1,
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onBindClick)
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "绑定",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.secondary,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                         )
                     }
@@ -2187,8 +2202,9 @@ private fun AppEntry(
     onActionsClick: () -> Unit,
     onArtifactClick: () -> Unit,
     chatBinding: ChatBinding?,
+    chatBindingCount: Int,
     onChatClick: () -> Unit,
-    onChatLongClick: () -> Unit,
+    onBindClick: () -> Unit,
 ) {
     val hasNewerActions = hasNewerActionsBuild(app)
 
@@ -2362,28 +2378,41 @@ private fun AppEntry(
                     maxLines = 1,
                 )
             }
-            Text(
-                if (chatBinding != null) "ChatGPT" else "绑定 GPT",
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .combinedClickable(
-                        onClick = onChatClick,
-                        onLongClick = onChatLongClick,
-                    )
-                    .padding(horizontal = 5.dp, vertical = 3.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = if (chatBinding != null) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.secondary
-                },
-                fontWeight = if (chatBinding != null) {
-                    FontWeight.SemiBold
-                } else {
-                    FontWeight.Normal
-                },
-                maxLines = 1,
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "GPT " + chatBindingCount,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onChatClick)
+                        .padding(horizontal = 5.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (chatBinding != null) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    fontWeight = if (chatBinding != null) {
+                        FontWeight.SemiBold
+                    } else {
+                        FontWeight.Normal
+                    },
+                    maxLines = 1,
+                )
+                Text(
+                    "绑定",
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onBindClick)
+                        .padding(horizontal = 5.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
