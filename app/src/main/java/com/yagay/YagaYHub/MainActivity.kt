@@ -3940,6 +3940,159 @@ private fun getOrCreateTokenKey(): SecretKey {
     return generator.generateKey()
 }
 
+private data class AiBindingStats(
+    val count: Int,
+    val latestAddedAt: Long?,
+)
+
+private fun buildAiBindingStats(
+    bindings: List<ChatBinding>,
+): Map<String, AiBindingStats> {
+    return bindings
+        .groupBy { normalizedRepoKey(it.repoKey) }
+        .mapValues { (_, items) ->
+            AiBindingStats(
+                count = items.size,
+                latestAddedAt = items
+                    .maxOfOrNull { it.addedAt }
+                    ?.takeIf { it > 0L },
+            )
+        }
+}
+
+private fun sortHubApps(
+    apps: List<HubApp>,
+    mode: AppSortMode,
+    ascending: Boolean,
+    bindingStats: Map<String, AiBindingStats>,
+): List<HubApp> {
+    if (apps.size <= 1) return apps
+
+    fun stats(app: HubApp): AiBindingStats {
+        val repo = app.repo ?: return AiBindingStats(0, null)
+        return bindingStats[
+            normalizedRepoKey(app.repoOwner + "/" + repo)
+        ] ?: AiBindingStats(0, null)
+    }
+
+    fun compareNullableText(
+        left: String?,
+        right: String?,
+    ): Int {
+        if (left == null && right == null) return 0
+        if (left == null) return 1
+        if (right == null) return -1
+        return if (ascending) {
+            left.compareTo(right)
+        } else {
+            right.compareTo(left)
+        }
+    }
+
+    fun compareNullableLong(
+        left: Long?,
+        right: Long?,
+    ): Int {
+        if (left == null && right == null) return 0
+        if (left == null) return 1
+        if (right == null) return -1
+        return if (ascending) {
+            left.compareTo(right)
+        } else {
+            right.compareTo(left)
+        }
+    }
+
+    val comparator = Comparator<HubApp> { left, right ->
+        val primary = when (mode) {
+            AppSortMode.DEFAULT -> 0
+            AppSortMode.ACTIONS_TIME ->
+                compareNullableText(
+                    left.latestActionTime,
+                    right.latestActionTime,
+                )
+            AppSortMode.PROJECT_TIME ->
+                compareNullableText(
+                    left.repoUpdatedTime,
+                    right.repoUpdatedTime,
+                )
+            AppSortMode.PUSH_TIME ->
+                compareNullableText(
+                    left.repoPushedTime,
+                    right.repoPushedTime,
+                )
+            AppSortMode.NAME -> {
+                val a = left.name.lowercase()
+                val b = right.name.lowercase()
+                if (ascending) a.compareTo(b) else b.compareTo(a)
+            }
+            AppSortMode.INSTALLED_TIME ->
+                compareNullableText(
+                    left.installedUpdateTime,
+                    right.installedUpdateTime,
+                )
+            AppSortMode.AI_COUNT -> {
+                val a = stats(left).count
+                val b = stats(right).count
+                if (ascending) a.compareTo(b) else b.compareTo(a)
+            }
+            AppSortMode.AI_RECENT ->
+                compareNullableLong(
+                    stats(left).latestAddedAt,
+                    stats(right).latestAddedAt,
+                )
+        }
+
+        if (primary != 0) {
+            primary
+        } else {
+            left.name.lowercase()
+                .compareTo(right.name.lowercase())
+        }
+    }
+
+    return if (mode == AppSortMode.DEFAULT) {
+        if (ascending) apps else apps.asReversed()
+    } else {
+        apps.sortedWith(comparator)
+    }
+}
+
+private fun saveSortSettings(
+    context: Context,
+    mode: AppSortMode,
+    ascending: Boolean,
+) {
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(SORT_MODE, mode.name)
+        .putBoolean(SORT_ASCENDING, ascending)
+        .apply()
+}
+
+private fun loadSortMode(context: Context): AppSortMode {
+    val saved = context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .getString(SORT_MODE, AppSortMode.DEFAULT.name)
+    return runCatching {
+        AppSortMode.valueOf(saved.orEmpty())
+    }.getOrDefault(AppSortMode.DEFAULT)
+}
+
+private fun loadSortAscending(
+    context: Context,
+    fallback: Boolean,
+): Boolean {
+    val prefs = context.getSharedPreferences(
+        TOKEN_PREFS,
+        Context.MODE_PRIVATE,
+    )
+    return if (prefs.contains(SORT_ASCENDING)) {
+        prefs.getBoolean(SORT_ASCENDING, fallback)
+    } else {
+        fallback
+    }
+}
+
 private fun saveLayoutMode(context: Context, mode: LayoutMode) {
     context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
         .edit()
@@ -4009,6 +4162,8 @@ private const val GITHUB_CLIENT_SECRET_DATA = "github_client_secret_data"
 private const val DOWNLOAD_TREE_URI = "download_tree_uri"
 private const val ROOT_CLEANUP_ENABLED = "root_cleanup_enabled"
 private const val LAYOUT_MODE = "layout_mode"
+private const val SORT_MODE = "sort_mode"
+private const val SORT_ASCENDING = "sort_ascending"
 private const val DOWNLOAD_STATE_JSON = "download_state_json"
 private const val TOKEN_KEY_ALIAS = "YagaYHubGitHubToken"
 
