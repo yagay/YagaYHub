@@ -1156,6 +1156,7 @@ private fun HubScreen(
             }
         }
     }
+}
 
     bindingListApp?.let { app ->
         val repo = app.repo
