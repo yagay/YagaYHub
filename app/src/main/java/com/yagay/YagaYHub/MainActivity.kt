@@ -1171,6 +1171,10 @@ private fun githubGet(
         connectTimeout = 10_000
         readTimeout = 30_000
         instanceFollowRedirects = followRedirects
+        useCaches = false
+        defaultUseCaches = false
+        setRequestProperty("Cache-Control", "no-store, no-cache")
+        setRequestProperty("Pragma", "no-cache")
         setRequestProperty("Accept", "application/vnd.github+json")
         setRequestProperty("User-Agent", "YagaYHub")
         setRequestProperty("X-GitHub-Api-Version", "2026-03-10")
@@ -1215,6 +1219,10 @@ private fun downloadArtifactZip(
                     connectTimeout = 10_000
                     readTimeout = 60_000
                     instanceFollowRedirects = true
+                    useCaches = false
+                    defaultUseCaches = false
+                    setRequestProperty("Cache-Control", "no-store, no-cache")
+                    setRequestProperty("Pragma", "no-cache")
                 }.also { downloadConnection = it }
             }
             apiCode in 200..299 -> apiConnection
@@ -1277,14 +1285,13 @@ private data class DownloadDestination(
     val finish: (() -> Unit)? = null,
 )
 
-private fun prepareDefaultDownloadDestination(
+private fun deleteDefaultDownloadByName(
     context: Context,
     fileName: String,
-): DownloadDestination? {
+    relativePath: String,
+    keepUri: Uri? = null,
+) {
     val resolver = context.contentResolver
-    val relativePath = Environment.DIRECTORY_DOWNLOADS + "/YagaYHub/"
-
-    // 同名文件先删除，避免系统生成 (1)、(2)。
     resolver.query(
         MediaStore.Downloads.EXTERNAL_CONTENT_URI,
         arrayOf(MediaStore.MediaColumns._ID),
@@ -1299,9 +1306,71 @@ private fun prepareDefaultDownloadDestination(
                 MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                 cursor.getLong(idColumn).toString(),
             )
-            runCatching { resolver.delete(existingUri, null, null) }
+            if (keepUri == null || existingUri != keepUri) {
+                runCatching { resolver.delete(existingUri, null, null) }
+            }
         }
     }
+}
+
+private fun deleteTreeDocumentsByName(
+    context: Context,
+    treeUri: Uri,
+    fileName: String,
+    keepUri: Uri? = null,
+) {
+    val resolver = context.contentResolver
+    val childrenUri = runCatching {
+        DocumentsContract.buildChildDocumentsUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri),
+        )
+    }.getOrNull() ?: return
+
+    resolver.query(
+        childrenUri,
+        arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        ),
+        null,
+        null,
+        null,
+    )?.use { cursor ->
+        val idColumn = cursor.getColumnIndexOrThrow(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID
+        )
+        val nameColumn = cursor.getColumnIndexOrThrow(
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME
+        )
+        while (cursor.moveToNext()) {
+            if (cursor.getString(nameColumn) != fileName) continue
+            val existingUri = DocumentsContract.buildDocumentUriUsingTree(
+                treeUri,
+                cursor.getString(idColumn),
+            )
+            if (keepUri == null || existingUri != keepUri) {
+                runCatching {
+                    DocumentsContract.deleteDocument(resolver, existingUri)
+                }
+            }
+        }
+    }
+}
+
+private fun prepareDefaultDownloadDestination(
+    context: Context,
+    fileName: String,
+): DownloadDestination? {
+    val resolver = context.contentResolver
+    val relativePath = Environment.DIRECTORY_DOWNLOADS + "/YagaYHub/"
+
+    // 先彻底删除同名旧文件和残留项，不保留旧 ZIP / pending 项。
+    deleteDefaultDownloadByName(
+        context = context,
+        fileName = fileName,
+        relativePath = relativePath,
+    )
 
     val values = ContentValues().apply {
         put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
@@ -1327,6 +1396,12 @@ private fun prepareDefaultDownloadDestination(
                 null,
                 null,
             )
+            deleteDefaultDownloadByName(
+                context = context,
+                fileName = fileName,
+                relativePath = relativePath,
+                keepUri = uri,
+            )
         },
     )
 }
@@ -1351,35 +1426,12 @@ private fun prepareTreeDownloadDestination(
         )
     }.getOrNull() ?: return null
 
-    // 自定义目录也执行同名覆盖。
-    resolver.query(
-        childrenUri,
-        arrayOf(
-            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-        ),
-        null,
-        null,
-        null,
-    )?.use { cursor ->
-        val idColumn = cursor.getColumnIndexOrThrow(
-            DocumentsContract.Document.COLUMN_DOCUMENT_ID
-        )
-        val nameColumn = cursor.getColumnIndexOrThrow(
-            DocumentsContract.Document.COLUMN_DISPLAY_NAME
-        )
-        while (cursor.moveToNext()) {
-            if (cursor.getString(nameColumn) == fileName) {
-                val existingUri = DocumentsContract.buildDocumentUriUsingTree(
-                    treeUri,
-                    cursor.getString(idColumn),
-                )
-                runCatching {
-                    DocumentsContract.deleteDocument(resolver, existingUri)
-                }
-            }
-        }
-    }
+    // 自定义目录也先删除全部同名旧文件 / 残留项。
+    deleteTreeDocumentsByName(
+        context = context,
+        treeUri = treeUri,
+        fileName = fileName,
+    )
 
     val uri = runCatching {
         DocumentsContract.createDocument(
@@ -1393,6 +1445,14 @@ private fun prepareTreeDownloadDestination(
     return DownloadDestination(
         uri = uri,
         displayPath = "自定义目录/" + fileName,
+        finish = {
+            deleteTreeDocumentsByName(
+                context = context,
+                treeUri = treeUri,
+                fileName = fileName,
+                keepUri = uri,
+            )
+        },
     )
 }
 
