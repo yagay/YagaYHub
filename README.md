@@ -2,8 +2,12 @@
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
 
-## 1.6.1
+## 1.6.2
 
+- 新增下载目录管理：默认 `Downloads/YagaYHub/`，设置中可使用系统目录选择器改为任意可写目录，并可恢复默认。
+- 下载文件名改为稳定的 `仓库名.zip`；同名 ZIP 下载前会先删除旧文件，下载完成后再次清理重复项，不再产生 `(1)`、`(2)` 等副本。
+- 默认 Downloads 和 SAF 自定义目录都执行同名旧文件删除；下载失败时删除本次新建的残留文件。
+- GitHub API 与 artifact 下载关闭 HTTP 缓存并发送 `no-store/no-cache`，不保留应用级下载缓存。
 - 已安装 App 显示本机最近更新时间，读取 Android `PackageInfo.lastUpdateTime`，格式为 `本机更新 MM-dd HH:mm`。
 - Actions 时间显示增加 `Actions` 标签，与本机更新时间明确区分。
 - 显示最近一次 Actions 的本地时间（MM-dd HH:mm）。
