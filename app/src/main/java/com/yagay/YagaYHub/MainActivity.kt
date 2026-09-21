@@ -144,6 +144,7 @@ private data class HubApp(
     val description: String,
     val installed: Boolean,
     val versionName: String?,
+    val installedUpdateTime: String? = null,
     val launchIntent: Intent?,
     val icon: Drawable?,
     val autoDiscovered: Boolean = false,
@@ -642,6 +643,17 @@ private fun AppEntry(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
         )
+        app.installedUpdateTime?.let { updateTime ->
+            Text(
+                "本机 " + updateTime,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         if (app.repo != null) {
             Spacer(Modifier.height(2.dp))
             Row(
@@ -791,6 +803,9 @@ private fun loadHubApps(context: Context): List<HubApp> {
                 description = "自动发现的 YagaY 应用",
                 installed = info != null,
                 versionName = info?.versionName,
+                installedUpdateTime = info?.lastUpdateTime
+                    ?.takeIf { it > 0L }
+                    ?.let(::formatLocalTime),
                 launchIntent = pm.getLaunchIntentForPackage(pkg),
                 icon = runCatching { applicationInfo?.loadIcon(pm) }.getOrNull(),
                 autoDiscovered = true,
@@ -816,6 +831,9 @@ private fun loadKnownApp(pm: PackageManager, spec: ProjectSpec): HubApp {
         description = spec.description,
         installed = info != null,
         versionName = info?.versionName,
+        installedUpdateTime = info?.lastUpdateTime
+            ?.takeIf { it > 0L }
+            ?.let(::formatLocalTime),
         launchIntent = if (info != null) pm.getLaunchIntentForPackage(spec.packageName) else null,
         icon = runCatching { applicationInfo?.loadIcon(pm) }.getOrNull(),
         actionsStatus = ActionsStatus.LOADING,
@@ -1055,6 +1073,11 @@ private fun fetchLatestArtifactInfo(
 
 private val actionsTimeFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("MM-dd HH:mm")
+
+private fun formatLocalTime(epochMillis: Long): String =
+    Instant.ofEpochMilli(epochMillis)
+        .atZone(ZoneId.systemDefault())
+        .format(actionsTimeFormatter)
 
 private fun formatActionsTime(value: String): String? {
     if (value.isBlank()) return null
