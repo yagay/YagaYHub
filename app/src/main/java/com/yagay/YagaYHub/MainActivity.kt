@@ -393,6 +393,7 @@ private data class DownloadUiState(
 
 
 private val knownProjects = listOf(
+    ProjectSpec("YagaYHub", "com.yagay.YagaYHub", "YagaYHub", "YagaY 应用统一入口与项目管理"),
     ProjectSpec("FloatLens", "com.yagay.floatlens", "FloatLens", "悬浮识别、截图与屏幕工具"),
     ProjectSpec("List Cleaner", "com.yagay.ListCleaner", "ListCleaner", "分享面板、组件与列表清理"),
     ProjectSpec("MiniWindowGuard", "com.yagay.MiniWindowGuard", "MiniWindowGuard", "后台播放与小窗增强"),
