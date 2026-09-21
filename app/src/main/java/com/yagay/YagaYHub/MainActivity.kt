@@ -63,6 +63,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,6 +80,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -111,12 +113,6 @@ private enum class ActionsStatus(val label: String) {
     UNKNOWN("未知"),
 }
 
-private data class ActionsArtifact(
-    val id: Long,
-    val runId: Long,
-    val name: String,
-)
-
 private data class HubApp(
     val name: String,
     val packageName: String,
@@ -128,7 +124,7 @@ private data class HubApp(
     val icon: Drawable?,
     val autoDiscovered: Boolean = false,
     val actionsStatus: ActionsStatus = ActionsStatus.NONE,
-    val latestSuccessfulArtifact: ActionsArtifact? = null,
+    val latestSuccessfulRunId: Long? = null,
 )
 
 private enum class AppFilter(val label: String) {
@@ -157,6 +153,7 @@ private fun HubScreen(context: Context) {
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(AppFilter.INSTALLED) }
     var refreshKey by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(refreshKey) {
         val loadedApps = loadHubApps(context)
@@ -282,16 +279,29 @@ private fun HubScreen(context: Context) {
                                 },
                                 onArtifactClick = {
                                     val repo = app.repo
-                                    val artifact = app.latestSuccessfulArtifact
-                                    if (repo != null && artifact != null) {
-                                        openUrl(
-                                            context,
-                                            "https://github.com/yagay/" + repo +
-                                                "/actions/runs/" + artifact.runId +
-                                                "/artifacts/" + artifact.id
-                                        )
+                                    val runId = app.latestSuccessfulRunId
+                                    if (repo == null || runId == null) {
+                                        Toast.makeText(context, "暂无成功构建", Toast.LENGTH_SHORT).show()
                                     } else {
-                                        Toast.makeText(context, "暂无可下载的成功构建 ZIP", Toast.LENGTH_SHORT).show()
+                                        scope.launch {
+                                            val artifactId = withContext(Dispatchers.IO) {
+                                                fetchLatestArtifactId(repo, runId)
+                                            }
+                                            if (artifactId != null) {
+                                                openUrl(
+                                                    context,
+                                                    "https://github.com/yagay/" + repo +
+                                                        "/actions/runs/" + runId +
+                                                        "/artifacts/" + artifactId
+                                                )
+                                            } else {
+                                                Toast.makeText(
+                                                    context,
+                                                    "最近成功构建没有可下载 ZIP，或产物已过期",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
                                     }
                                 },
                             )
@@ -419,7 +429,7 @@ private fun AppEntry(
                         .clip(CircleShape)
                         .clickable(onClick = onArtifactClick)
                         .padding(3.dp),
-                    tint = if (app.latestSuccessfulArtifact != null) {
+                    tint = if (app.latestSuccessfulRunId != null) {
                         MaterialTheme.colorScheme.primary
                     } else {
                         MaterialTheme.colorScheme.outline
@@ -525,7 +535,7 @@ private fun loadKnownApp(pm: PackageManager, spec: ProjectSpec): HubApp {
 
 private data class RepoActionsInfo(
     val status: ActionsStatus,
-    val artifact: ActionsArtifact?,
+    val latestSuccessfulRunId: Long?,
 )
 
 private suspend fun loadActionsStatuses(apps: List<HubApp>): List<HubApp> = coroutineScope {
@@ -537,7 +547,7 @@ private suspend fun loadActionsStatuses(apps: List<HubApp>): List<HubApp> = coro
                 val info = fetchRepoActionsInfo(app.repo)
                 app.copy(
                     actionsStatus = info.status,
-                    latestSuccessfulArtifact = info.artifact,
+                    latestSuccessfulRunId = info.latestSuccessfulRunId,
                 )
             }
         }
@@ -578,7 +588,7 @@ private fun fetchRepoActionsInfo(repo: String): RepoActionsInfo {
 
         RepoActionsInfo(
             status = latestStatus,
-            artifact = successfulRunId?.let { fetchLatestArtifact(repo, it) },
+            latestSuccessfulRunId = successfulRunId,
         )
     } catch (_: Exception) {
         RepoActionsInfo(ActionsStatus.UNKNOWN, null)
@@ -587,7 +597,7 @@ private fun fetchRepoActionsInfo(repo: String): RepoActionsInfo {
     }
 }
 
-private fun fetchLatestArtifact(repo: String, runId: Long): ActionsArtifact? {
+private fun fetchLatestArtifactId(repo: String, runId: Long): Long? {
     var connection: HttpURLConnection? = null
     return try {
         connection = githubGet(
@@ -604,11 +614,7 @@ private fun fetchLatestArtifact(repo: String, runId: Long): ActionsArtifact? {
             if (!artifact.optBoolean("expired", true)) {
                 val id = artifact.optLong("id")
                 if (id > 0L) {
-                    return ActionsArtifact(
-                        id = id,
-                        runId = runId,
-                        name = artifact.optString("name", "artifact"),
-                    )
+                    return id
                 }
             }
         }
