@@ -896,20 +896,38 @@ private fun mergeGithubRepositories(
         val key = (repository.owner + "/" + repository.name).lowercase()
         if (key in existingRepos) return@forEach
 
-        result += HubApp(
-            name = repository.name,
-            packageName = "github:" + repository.owner + "/" + repository.name,
-            repo = repository.name,
-            repoOwner = repository.owner,
-            description = repository.description
-                ?: if (repository.isPrivate) "GitHub 私有项目" else "GitHub 项目",
-            installed = false,
-            versionName = null,
-            launchIntent = null,
-            icon = null,
-            repoOnly = true,
-            actionsStatus = ActionsStatus.LOADING,
-        )
+        val matchingAppIndex = result.indexOfFirst { app ->
+            app.repo == null && (
+                app.name.equals(repository.name, ignoreCase = true) ||
+                    app.packageName.substringAfterLast('.')
+                        .equals(repository.name, ignoreCase = true)
+            )
+        }
+
+        if (matchingAppIndex >= 0) {
+            val app = result[matchingAppIndex]
+            result[matchingAppIndex] = app.copy(
+                repo = repository.name,
+                repoOwner = repository.owner,
+                description = repository.description ?: app.description,
+                actionsStatus = ActionsStatus.LOADING,
+            )
+        } else {
+            result += HubApp(
+                name = repository.name,
+                packageName = "github:" + repository.owner + "/" + repository.name,
+                repo = repository.name,
+                repoOwner = repository.owner,
+                description = repository.description
+                    ?: if (repository.isPrivate) "GitHub 私有项目" else "GitHub 项目",
+                installed = false,
+                versionName = null,
+                launchIntent = null,
+                icon = null,
+                repoOnly = true,
+                actionsStatus = ActionsStatus.LOADING,
+            )
+        }
         existingRepos += key
     }
 
@@ -934,8 +952,12 @@ private suspend fun loadActionsStatuses(
 ): List<HubApp> = coroutineScope {
     apps.map { app ->
         async {
-            if (app.repo == null) {
-                app
+            if (app.repo == null || (token.isBlank() && app.repoOnly)) {
+                if (app.repoOnly && token.isBlank()) {
+                    app.copy(actionsStatus = ActionsStatus.UNKNOWN)
+                } else {
+                    app
+                }
             } else {
                 val info = fetchLatestActionsInfo(app.repoOwner, app.repo, token)
                 app.copy(
@@ -1078,7 +1100,7 @@ private fun githubGet(
         instanceFollowRedirects = followRedirects
         setRequestProperty("Accept", "application/vnd.github+json")
         setRequestProperty("User-Agent", "YagaYHub")
-        setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+        setRequestProperty("X-GitHub-Api-Version", "2026-03-10")
         if (token.isNotBlank()) {
             setRequestProperty("Authorization", "Bearer " + token)
         }
@@ -1156,7 +1178,7 @@ private fun downloadArtifactZip(
 
         context.contentResolver.update(
             outputUri,
-            ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+            ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
             null,
             null,
         )
