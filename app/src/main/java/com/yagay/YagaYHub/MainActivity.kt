@@ -513,6 +513,8 @@ private fun HubScreen(
         mutableStateOf(downloadUiState?.let { !it.running } == true)
     }
     var pendingDownloadRequest by remember { mutableStateOf<ArtifactDownloadRequest?>(null) }
+    var bindingListApp by remember { mutableStateOf<HubApp?>(null) }
+    var bindingUiRevision by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     val directoryPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -726,6 +728,7 @@ private fun HubScreen(
                 val itemContent: @Composable (HubApp) -> Unit = { app ->
                     val chatBinding = remember(
                         chatBindingRevision,
+                        bindingUiRevision,
                         app.repoOwner,
                         app.repo,
                     ) {
@@ -825,21 +828,21 @@ private fun HubScreen(
                     }
                     val onChatClick: () -> Unit = {
                         val repo = app.repo
-                        when {
-                            repo == null -> Unit
-                            chatBinding != null -> openUrl(
-                                context,
-                                chatBinding.url,
-                                reuseExisting = true,
-                                bindingRepoKey = chatBinding.repoKey,
-                                bindingProject = app.name,
-                                bindingTitle = chatBinding.title,
-                            )
-                            else -> startChatGptBinding(
+                        if (repo != null) {
+                            val bindings = loadChatBindings(
                                 context = context,
-                                app = app,
-                                currentBinding = null,
+                                owner = app.repoOwner,
+                                repo = repo,
                             )
+                            if (bindings.isEmpty()) {
+                                startChatGptBinding(
+                                    context = context,
+                                    app = app,
+                                    currentBinding = null,
+                                )
+                            } else {
+                                bindingListApp = app
+                            }
                         }
                     }
                     val onChatLongClick: () -> Unit = {
@@ -847,7 +850,7 @@ private fun HubScreen(
                             startChatGptBinding(
                                 context = context,
                                 app = app,
-                                currentBinding = chatBinding,
+                                currentBinding = null,
                             )
                         }
                     }
@@ -907,6 +910,136 @@ private fun HubScreen(
                     }
                 }
             }
+        }
+    }
+
+    bindingListApp?.let { app ->
+        val repo = app.repo
+        if (repo == null) {
+            bindingListApp = null
+        } else {
+            val bindings = remember(
+                app.repoOwner,
+                repo,
+                chatBindingRevision,
+                bindingUiRevision,
+            ) {
+                loadChatBindings(
+                    context = context,
+                    owner = app.repoOwner,
+                    repo = repo,
+                )
+            }
+
+            AlertDialog(
+                onDismissRequest = { bindingListApp = null },
+                title = {
+                    Text(
+                        "ChatGPT · " + app.name +
+                            if (bindings.isNotEmpty()) " (" + bindings.size + ")" else ""
+                    )
+                },
+                text = {
+                    if (bindings.isEmpty()) {
+                        Text("当前没有绑定页面")
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.height(420.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            lazyItems(
+                                items = bindings,
+                                key = { it.url },
+                            ) { binding ->
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(
+                                            horizontal = 12.dp,
+                                            vertical = 10.dp,
+                                        ),
+                                    ) {
+                                        Text(
+                                            binding.title,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Spacer(Modifier.height(3.dp))
+                                        Text(
+                                            if (binding.addedAt > 0L) {
+                                                "绑定时间 · " + formatLocalTime(binding.addedAt)
+                                            } else {
+                                                "旧绑定"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            TextButton(
+                                                onClick = {
+                                                    removeChatBinding(
+                                                        context = context,
+                                                        url = binding.url,
+                                                    )
+                                                    removeChatBindingFromYBrowser(
+                                                        context = context,
+                                                        url = binding.url,
+                                                    )
+                                                    bindingUiRevision++
+                                                },
+                                            ) {
+                                                Text("取消绑定")
+                                            }
+                                            TextButton(
+                                                onClick = {
+                                                    bindingListApp = null
+                                                    openUrl(
+                                                        context = context,
+                                                        url = binding.url,
+                                                        reuseExisting = true,
+                                                        bindingRepoKey = binding.repoKey,
+                                                        bindingProject = app.name,
+                                                        bindingTitle = binding.title,
+                                                    )
+                                                },
+                                            ) {
+                                                Text("进入")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            bindingListApp = null
+                            startChatGptBinding(
+                                context = context,
+                                app = app,
+                                currentBinding = null,
+                            )
+                        },
+                    ) {
+                        Text("添加绑定")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { bindingListApp = null }) {
+                        Text("关闭")
+                    }
+                },
+            )
         }
     }
 
@@ -3616,6 +3749,8 @@ private const val ACTION_REMOVE_CHATGPT_BINDING =
     "com.yagay.YagaYHub.action.REMOVE_CHATGPT_BINDING"
 private const val YBROWSER_CHAT_BINDING_SYNC_ACTION =
     "com.yagay.YBrowser.action.CHATGPT_BINDING_SYNC"
+private const val YBROWSER_CHAT_BINDING_REMOVE_ACTION =
+    "com.yagay.YBrowser.action.CHATGPT_BINDING_REMOVE"
 private const val YBROWSER_SELECT_CHAT_ACTION =
     "com.yagay.YBrowser.action.SELECT_CHATGPT_CHAT"
 private const val EXTRA_CHAT_BIND_REPO = "com.yagay.YBrowser.extra.BIND_REPO"
@@ -3887,6 +4022,21 @@ private fun startChatGptBinding(
             Toast.LENGTH_SHORT,
         ).show()
     }
+}
+
+private fun removeChatBindingFromYBrowser(
+    context: Context,
+    url: String,
+) {
+    val intent = Intent(YBROWSER_CHAT_BINDING_REMOVE_ACTION).apply {
+        setPackage(YBROWSER_PACKAGE)
+        putExtra(EXTRA_CHAT_BIND_URL, url)
+        addFlags(
+            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        )
+    }
+    runCatching { context.startActivity(intent) }
 }
 
 private fun syncChatBindingToYBrowser(
