@@ -85,6 +85,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
@@ -119,7 +120,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -197,11 +197,11 @@ class MainActivity : ComponentActivity() {
                 val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
                 val title = intent.getStringExtra(EXTRA_CHAT_BIND_TITLE)
                     .orEmpty()
-                    .ifBlank { "ChatGPT" }
+                    .ifBlank { "AI" }
                 if (
                     repo.isBlank() ||
                     url.isBlank() ||
-                    !isBindableChatGptUrl(url)
+                    !isBindableAiPageUrl(url)
                 ) {
                     return
                 }
@@ -215,7 +215,7 @@ class MainActivity : ComponentActivity() {
                 chatBindingRevision++
                 Toast.makeText(
                     this,
-                    "已绑定 ChatGPT · " + repo.substringAfter('/'),
+                    "已绑定 AI · " + repo.substringAfter('/'),
                     Toast.LENGTH_SHORT,
                 ).show()
             }
@@ -223,8 +223,8 @@ class MainActivity : ComponentActivity() {
                 val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
                 val title = intent.getStringExtra(EXTRA_CHAT_BIND_TITLE)
                     .orEmpty()
-                    .ifBlank { "ChatGPT" }
-                if (isBindableChatGptUrl(url)) {
+                    .ifBlank { "AI" }
+                if (isBindableAiPageUrl(url)) {
                     quickChatBindingRequest = QuickChatBindingRequest(
                         url = url,
                         title = title,
@@ -248,11 +248,11 @@ class ChatBindingCommandReceiver : BroadcastReceiver() {
                 val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
                 val title = intent.getStringExtra(EXTRA_CHAT_BIND_TITLE)
                     .orEmpty()
-                    .ifBlank { "ChatGPT" }
+                    .ifBlank { "AI" }
                 if (
                     repo.isBlank() ||
                     url.isBlank() ||
-                    !isBindableChatGptUrl(url)
+                    !isBindableAiPageUrl(url)
                 ) {
                     return
                 }
@@ -264,7 +264,7 @@ class ChatBindingCommandReceiver : BroadcastReceiver() {
                 )
                 Toast.makeText(
                     context,
-                    "已绑定 ChatGPT · " + repo.substringAfter('/'),
+                    "已绑定 AI · " + repo.substringAfter('/'),
                     Toast.LENGTH_SHORT,
                 ).show()
             }
@@ -694,7 +694,7 @@ private fun HubScreen(
                         if (target == null) {
                             Toast.makeText(
                                 context,
-                                "还没有绑定 ChatGPT 页面，请先在项目中点击“绑定”",
+                                "还没有绑定 AI 页面，请先在项目中点击“绑定”",
                                 Toast.LENGTH_SHORT,
                             ).show()
                         } else {
@@ -709,8 +709,8 @@ private fun HubScreen(
                     },
                 ) {
                     Icon(
-                        painter = painterResource(R.drawable.ic_chatgpt),
-                        contentDescription = "ChatGPT",
+                        Icons.Outlined.AutoAwesome,
+                        contentDescription = "AI",
                         modifier = Modifier.size(24.dp),
                     )
                 }
@@ -985,7 +985,7 @@ private fun HubScreen(
                 onDismissRequest = { bindingListApp = null },
                 title = {
                     Text(
-                        "ChatGPT · " + app.name +
+                        "AI · " + app.name +
                             if (bindings.isNotEmpty()) " (" + bindings.size + ")" else ""
                     )
                 },
@@ -1100,7 +1100,7 @@ private fun HubScreen(
 
         AlertDialog(
             onDismissRequest = onQuickChatBindingDismiss,
-            title = { Text("绑定当前 ChatGPT") },
+            title = { Text("绑定当前 AI") },
             text = {
                 Column {
                     Text(
@@ -2157,7 +2157,7 @@ private fun AppListEntry(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "GPT " + chatBindingCount,
+                            "AI " + chatBindingCount,
                             style = MaterialTheme.typography.labelMedium,
                             color = if (chatBinding != null) {
                                 MaterialTheme.colorScheme.primary
@@ -2384,7 +2384,7 @@ private fun AppEntry(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "GPT " + chatBindingCount,
+                    "AI " + chatBindingCount,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .clickable(onClick = onChatClick)
@@ -3913,18 +3913,11 @@ private fun openAppDetails(context: Context, packageName: String) {
     runCatching { context.startActivity(intent) }
 }
 
-private fun isBindableChatGptUrl(url: String): Boolean {
+private fun isBindableAiPageUrl(url: String): Boolean {
     val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
-    val host = uri.host
-        ?.lowercase()
-        ?.removePrefix("www.")
-        ?: return false
-    if (host != "chatgpt.com" && host != "chat.openai.com") return false
-    val path = uri.path.orEmpty()
-    if (path.startsWith("/share/")) return false
-    return path.startsWith("/c/") ||
-        path.contains("/c/") ||
-        path.startsWith("/g/")
+    val scheme = uri.scheme?.lowercase() ?: return false
+    return (scheme == "http" || scheme == "https") &&
+        !uri.host.isNullOrBlank()
 }
 
 private fun normalizedRepoKey(repoKey: String): String =
@@ -3948,7 +3941,7 @@ private fun loadAllChatBindings(context: Context): List<ChatBinding> {
             add(
                 ChatBinding(
                     repoKey = repoKey,
-                    title = item.optString("title").ifBlank { "ChatGPT" },
+                    title = item.optString("title").ifBlank { "AI" },
                     url = url,
                     addedAt = item.optLong("addedAt", 0L),
                 ),
@@ -3968,7 +3961,7 @@ private fun loadAllChatBindings(context: Context): List<ChatBinding> {
                     repoKey = repoKey,
                     title = prefs.getString(repoKey + ":title", null)
                         ?.takeIf { it.isNotBlank() }
-                        ?: "ChatGPT",
+                        ?: "AI",
                     url = url,
                     addedAt = 0L,
                 )
@@ -3995,7 +3988,7 @@ private fun saveAllChatBindings(
             array.put(
                 JSONObject()
                     .put("repoKey", normalizedRepoKey(binding.repoKey))
-                    .put("title", binding.title.ifBlank { "ChatGPT" })
+                    .put("title", binding.title.ifBlank { "AI" })
                     .put("url", normalizeChatBindingUrl(binding.url))
                     .put("addedAt", binding.addedAt),
             )
@@ -4024,12 +4017,12 @@ private fun saveChatBinding(
     val addedAt = sameBinding?.addedAt?.takeIf { it > 0L }
         ?: System.currentTimeMillis()
 
-    // A ChatGPT page can belong to only one project.
+    // One AI page can belong to only one project.
     val merged = buildList {
         add(
             ChatBinding(
                 repoKey = key,
-                title = title.ifBlank { "ChatGPT" },
+                title = title.ifBlank { "AI" },
                 url = normalizedUrl,
                 addedAt = addedAt,
             ),
@@ -4081,7 +4074,7 @@ private fun projectNameForBinding(binding: ChatBinding): String {
     val repo = binding.repoKey.substringAfterLast('/')
     return knownProjects.firstOrNull {
         it.repo.equals(repo, ignoreCase = true)
-    }?.name ?: repo.ifBlank { "ChatGPT" }
+    }?.name ?: repo.ifBlank { "AI" }
 }
 
 private fun chatTargetsJson(
@@ -4203,6 +4196,7 @@ private fun openUrl(
     val intent = Intent(YBROWSER_ACTION).apply {
         setPackage(YBROWSER_PACKAGE)
         putExtra(YBROWSER_EXTRA_URL, url)
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
         if (reuseExisting) {
             putExtra(YBROWSER_EXTRA_REUSE_EXISTING, true)
         }
@@ -4225,6 +4219,8 @@ private const val YBROWSER_ACTION = "com.yagay.YBrowser.action.OPEN_URL"
 private const val YBROWSER_EXTRA_URL = "com.yagay.YBrowser.extra.URL"
 private const val YBROWSER_EXTRA_REUSE_EXISTING =
     "com.yagay.YBrowser.extra.REUSE_EXISTING"
+private const val YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE =
+    "com.yagay.YBrowser.extra.YAGAYHUB_BINDING_MODE"
 
 @Composable
 private fun YagaYHubTheme(content: @Composable () -> Unit) {
