@@ -4104,6 +4104,7 @@ private fun startChatGptBinding(
     val repo = app.repo ?: return
     val intent = Intent(YBROWSER_SELECT_CHAT_POPUP_ACTION).apply {
         setPackage(YBROWSER_PACKAGE)
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
         putExtra(
             EXTRA_CHAT_BIND_REPO,
             app.repoOwner + "/" + repo,
@@ -4166,6 +4167,8 @@ private fun openChatPopup(
 ) {
     val intent = Intent(YBROWSER_OPEN_POPUP_ACTION).apply {
         setPackage(YBROWSER_PACKAGE)
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE, true)
         putExtra(YBROWSER_EXTRA_URL, url)
         putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
         if (!bindingRepoKey.isNullOrBlank()) {
@@ -4221,6 +4224,8 @@ private const val YBROWSER_EXTRA_REUSE_EXISTING =
     "com.yagay.YBrowser.extra.REUSE_EXISTING"
 private const val YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE =
     "com.yagay.YBrowser.extra.YAGAYHUB_BINDING_MODE"
+private const val YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE =
+    "com.yagay.YBrowser.extra.YAGAYHUB_COMPACT_MODE"
 
 @Composable
 private fun YagaYHubTheme(content: @Composable () -> Unit) {
