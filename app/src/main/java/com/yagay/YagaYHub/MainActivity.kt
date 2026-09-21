@@ -906,11 +906,11 @@ private fun HubScreen(
 
                     val onClick: () -> Unit = {
                         when {
-                            app.launchIntent != null -> openApp(context, app)
                             app.repo != null -> openUrl(
                                 context,
                                 "https://github.com/" + app.repoOwner + "/" + app.repo
                             )
+                            app.launchIntent != null -> openApp(context, app)
                             app.installed -> openAppDetails(context, app.packageName)
                             else -> Unit
                         }
@@ -2163,6 +2163,10 @@ private fun AppListEntry(
                 app.latestActionTime?.let { actionTime ->
                     Text(
                         "Actions   " + actionTime,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(onClick = onActionsClick)
+                            .padding(horizontal = 2.dp, vertical = 1.dp),
                         style = MaterialTheme.typography.labelMedium,
                         color = when {
                             !app.installed && !app.repoOnly ->
@@ -2469,6 +2473,10 @@ private fun AppEntry(
             app.latestActionTime?.let { actionTime ->
                 Text(
                     "Actions " + actionTime,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(onClick = onActionsClick)
+                        .padding(horizontal = 2.dp, vertical = 1.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = when {
                         !app.installed && !app.repoOnly ->
