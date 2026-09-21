@@ -114,6 +114,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
@@ -1614,7 +1615,7 @@ private fun AppListEntry(
                             !app.installed && !app.repoOnly ->
                                 MaterialTheme.colorScheme.error
                             hasNewerActions ->
-                                MaterialTheme.colorScheme.primary
+                                Color(0xFFFFC107)
                             else ->
                                 MaterialTheme.colorScheme.onSurfaceVariant
                         },
@@ -1876,7 +1877,7 @@ private fun AppEntry(
                         !app.installed && !app.repoOnly ->
                             MaterialTheme.colorScheme.error
                         hasNewerActions ->
-                            MaterialTheme.colorScheme.primary
+                            Color(0xFFFFC107)
                         else ->
                             MaterialTheme.colorScheme.onSurfaceVariant
                     },
