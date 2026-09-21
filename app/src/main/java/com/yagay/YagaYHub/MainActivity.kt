@@ -4031,12 +4031,8 @@ private fun removeChatBindingFromYBrowser(
     val intent = Intent(YBROWSER_CHAT_BINDING_REMOVE_ACTION).apply {
         setPackage(YBROWSER_PACKAGE)
         putExtra(EXTRA_CHAT_BIND_URL, url)
-        addFlags(
-            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                Intent.FLAG_ACTIVITY_SINGLE_TOP
-        )
     }
-    runCatching { context.startActivity(intent) }
+    runCatching { context.sendBroadcast(intent) }
 }
 
 private fun syncChatBindingToYBrowser(
