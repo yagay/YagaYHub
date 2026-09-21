@@ -124,7 +124,6 @@ private data class HubApp(
     val icon: Drawable?,
     val autoDiscovered: Boolean = false,
     val actionsStatus: ActionsStatus = ActionsStatus.NONE,
-    val latestSuccessfulRunId: Long? = null,
 )
 
 private enum class AppFilter(val label: String) {
@@ -279,25 +278,24 @@ private fun HubScreen(context: Context) {
                                 },
                                 onArtifactClick = {
                                     val repo = app.repo
-                                    val runId = app.latestSuccessfulRunId
-                                    if (repo == null || runId == null) {
-                                        Toast.makeText(context, "暂无成功构建", Toast.LENGTH_SHORT).show()
+                                    if (repo == null) {
+                                        Toast.makeText(context, "未配置 GitHub 仓库", Toast.LENGTH_SHORT).show()
                                     } else {
                                         scope.launch {
-                                            val artifactId = withContext(Dispatchers.IO) {
-                                                fetchLatestArtifactId(repo, runId)
+                                            val artifact = withContext(Dispatchers.IO) {
+                                                fetchLatestSuccessfulArtifact(repo)
                                             }
-                                            if (artifactId != null) {
+                                            if (artifact != null) {
                                                 openUrl(
                                                     context,
                                                     "https://github.com/yagay/" + repo +
-                                                        "/actions/runs/" + runId +
-                                                        "/artifacts/" + artifactId
+                                                        "/actions/runs/" + artifact.first +
+                                                        "/artifacts/" + artifact.second
                                                 )
                                             } else {
                                                 Toast.makeText(
                                                     context,
-                                                    "最近成功构建没有可下载 ZIP，或产物已过期",
+                                                    "暂无可下载的成功构建 ZIP，或产物已过期",
                                                     Toast.LENGTH_SHORT
                                                 ).show()
                                             }
@@ -429,11 +427,7 @@ private fun AppEntry(
                         .clip(CircleShape)
                         .clickable(onClick = onArtifactClick)
                         .padding(3.dp),
-                    tint = if (app.latestSuccessfulRunId != null) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.outline
-                    },
+                    tint = MaterialTheme.colorScheme.primary,
                 )
             }
         }
@@ -533,65 +527,58 @@ private fun loadKnownApp(pm: PackageManager, spec: ProjectSpec): HubApp {
     )
 }
 
-private data class RepoActionsInfo(
-    val status: ActionsStatus,
-    val latestSuccessfulRunId: Long?,
-)
-
 private suspend fun loadActionsStatuses(apps: List<HubApp>): List<HubApp> = coroutineScope {
     apps.map { app ->
         async {
             if (app.repo == null) {
                 app
             } else {
-                val info = fetchRepoActionsInfo(app.repo)
-                app.copy(
-                    actionsStatus = info.status,
-                    latestSuccessfulRunId = info.latestSuccessfulRunId,
-                )
+                app.copy(actionsStatus = fetchLatestActionsStatus(app.repo))
             }
         }
     }.awaitAll()
 }
 
-private fun fetchRepoActionsInfo(repo: String): RepoActionsInfo {
+private fun fetchLatestActionsStatus(repo: String): ActionsStatus {
+    var connection: HttpURLConnection? = null
+    return try {
+        connection = githubGet(
+            "https://api.github.com/repos/yagay/" + repo + "/actions/runs?per_page=1"
+        )
+        if (connection.responseCode !in 200..299) return ActionsStatus.UNKNOWN
+
+        val body = connection.inputStream.bufferedReader().use { it.readText() }
+        val runs = JSONObject(body).optJSONArray("workflow_runs")
+        if (runs == null || runs.length() == 0) {
+            ActionsStatus.NONE
+        } else {
+            mapActionsStatus(runs.getJSONObject(0))
+        }
+    } catch (_: Exception) {
+        ActionsStatus.UNKNOWN
+    } finally {
+        connection?.disconnect()
+    }
+}
+
+private fun fetchLatestSuccessfulArtifact(repo: String): Pair<Long, Long>? {
     var runsConnection: HttpURLConnection? = null
     return try {
         runsConnection = githubGet(
-            "https://api.github.com/repos/yagay/" + repo + "/actions/runs?per_page=20"
+            "https://api.github.com/repos/yagay/" + repo +
+                "/actions/runs?status=success&per_page=1"
         )
-
-        if (runsConnection.responseCode !in 200..299) {
-            return RepoActionsInfo(ActionsStatus.UNKNOWN, null)
-        }
+        if (runsConnection.responseCode !in 200..299) return null
 
         val body = runsConnection.inputStream.bufferedReader().use { it.readText() }
-        val runs = JSONObject(body).optJSONArray("workflow_runs")
-        if (runs == null || runs.length() == 0) {
-            return RepoActionsInfo(ActionsStatus.NONE, null)
-        }
+        val runs = JSONObject(body).optJSONArray("workflow_runs") ?: return null
+        if (runs.length() == 0) return null
 
-        val latestRun = runs.getJSONObject(0)
-        val latestStatus = mapActionsStatus(latestRun)
-
-        var successfulRunId: Long? = null
-        for (index in 0 until runs.length()) {
-            val run = runs.getJSONObject(index)
-            if (
-                run.optString("status") == "completed" &&
-                run.optString("conclusion") == "success"
-            ) {
-                successfulRunId = run.optLong("id").takeIf { it > 0L }
-                if (successfulRunId != null) break
-            }
-        }
-
-        RepoActionsInfo(
-            status = latestStatus,
-            latestSuccessfulRunId = successfulRunId,
-        )
+        val runId = runs.getJSONObject(0).optLong("id").takeIf { it > 0L } ?: return null
+        val artifactId = fetchLatestArtifactId(repo, runId) ?: return null
+        runId to artifactId
     } catch (_: Exception) {
-        RepoActionsInfo(ActionsStatus.UNKNOWN, null)
+        null
     } finally {
         runsConnection?.disconnect()
     }
@@ -613,9 +600,7 @@ private fun fetchLatestArtifactId(repo: String, runId: Long): Long? {
             val artifact = artifacts.getJSONObject(index)
             if (!artifact.optBoolean("expired", true)) {
                 val id = artifact.optLong("id")
-                if (id > 0L) {
-                    return id
-                }
+                if (id > 0L) return id
             }
         }
         null
