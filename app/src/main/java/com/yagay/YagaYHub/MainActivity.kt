@@ -965,6 +965,17 @@ private fun GitHubSettingsDialog(
     var clientSecret by remember(currentClientSecret) {
         mutableStateOf(currentClientSecret)
     }
+    var showGithubAdvanced by remember(
+        currentClientId,
+        currentClientSecret,
+    ) {
+        mutableStateOf(
+            currentClientId.isBlank() || currentClientSecret.isBlank()
+        )
+    }
+
+    val githubAppConfigured =
+        clientId.isNotBlank() && clientSecret.isNotBlank()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1007,57 +1018,117 @@ private fun GitHubSettingsDialog(
                         onCheckedChange = onRootCleanupChanged,
                     )
                 }
-                OutlinedTextField(
-                    value = clientId,
-                    onValueChange = { clientId = it.trim() },
+                Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("GitHub App Client ID") },
-                    placeholder = { Text("Iv1.…") },
-                )
-                OutlinedTextField(
-                    value = clientSecret,
-                    onValueChange = { clientSecret = it.trim() },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("GitHub App Client Secret") },
-                    placeholder = { Text("仅加密保存在本机") },
-                    visualTransformation = PasswordVisualTransformation(),
-                )
-                TextButton(
-                    onClick = {
-                        onWebLogin(
-                            clientId.trim(),
-                            clientSecret.trim(),
-                        )
-                    },
-                    enabled = clientId.isNotBlank() &&
-                        clientSecret.isNotBlank() &&
-                        !webAuthInProgress,
+                    shape = RoundedCornerShape(12.dp),
+                    tonalElevation = 1.dp,
                 ) {
-                    Text(
-                        if (webAuthInProgress) {
-                            "正在登录 GitHub…"
-                        } else {
-                            "登录 GitHub"
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            if (currentToken.isNotBlank()) {
+                                "GitHub 账号：已授权"
+                            } else if (githubAppConfigured) {
+                                "GitHub 账号：已配置，未授权"
+                            } else {
+                                "GitHub 账号：首次配置"
+                            },
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+
+                        TextButton(
+                            onClick = {
+                                onWebLogin(
+                                    clientId.trim(),
+                                    clientSecret.trim(),
+                                )
+                            },
+                            enabled = githubAppConfigured && !webAuthInProgress,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                if (webAuthInProgress) {
+                                    "正在登录 GitHub…"
+                                } else {
+                                    "一键登录 GitHub"
+                                }
+                            )
                         }
+
+                        TextButton(
+                            onClick = {
+                                showGithubAdvanced = !showGithubAdvanced
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                if (showGithubAdvanced) {
+                                    "收起高级设置"
+                                } else {
+                                    "高级设置"
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if (showGithubAdvanced) {
+                    OutlinedTextField(
+                        value = clientId,
+                        onValueChange = { clientId = it.trim() },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("GitHub App Client ID") },
+                        placeholder = { Text("Iv1.…") },
+                    )
+                    OutlinedTextField(
+                        value = clientSecret,
+                        onValueChange = { clientSecret = it.trim() },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("GitHub App Client Secret") },
+                        placeholder = { Text("仅加密保存在本机") },
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                    TextButton(
+                        onClick = {
+                            onWebLogin(
+                                clientId.trim(),
+                                clientSecret.trim(),
+                            )
+                        },
+                        enabled = githubAppConfigured && !webAuthInProgress,
+                    ) {
+                        Text(
+                            if (
+                                currentClientId.isBlank() ||
+                                currentClientSecret.isBlank()
+                            ) {
+                                "保存配置并登录"
+                            } else {
+                                "使用当前配置重新登录"
+                            }
+                        )
+                    }
+                    TextButton(
+                        onClick = { onAuthorize(clientId.trim()) },
+                        enabled = clientId.isNotBlank() && !webAuthInProgress,
+                    ) {
+                        Text("Device Flow（备用）")
+                    }
+                    OutlinedTextField(
+                        value = token,
+                        onValueChange = { token = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Fine-grained token（备用）") },
+                        placeholder = { Text("github_pat_…") },
+                        visualTransformation = PasswordVisualTransformation(),
                     )
                 }
-                TextButton(
-                    onClick = { onAuthorize(clientId.trim()) },
-                    enabled = clientId.isNotBlank() && !webAuthInProgress,
-                ) {
-                    Text("Device Flow（备用）")
-                }
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = { token = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("Fine-grained token（备用）") },
-                    placeholder = { Text("github_pat_…") },
-                    visualTransformation = PasswordVisualTransformation(),
-                )
             }
         },
         confirmButton = {
