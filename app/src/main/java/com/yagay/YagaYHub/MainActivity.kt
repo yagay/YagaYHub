@@ -237,9 +237,9 @@ class MainActivity : ComponentActivity() {
 class ChatBindingCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action != ACTION_REMOVE_CHATGPT_BINDING) return
-        val repoKey = intent.getStringExtra(EXTRA_CHAT_BIND_REPO).orEmpty()
-        if (repoKey.isBlank()) return
-        removeChatBinding(context, repoKey)
+        val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
+        if (url.isBlank()) return
+        removeChatBinding(context, url)
     }
 }
 
@@ -434,6 +434,7 @@ private data class ChatBinding(
     val repoKey: String,
     val title: String,
     val url: String,
+    val addedAt: Long = System.currentTimeMillis(),
 )
 
 private data class QuickChatBindingRequest(
@@ -3622,6 +3623,8 @@ private const val EXTRA_CHAT_BIND_PROJECT = "com.yagay.YBrowser.extra.BIND_PROJE
 private const val EXTRA_CHAT_BIND_URL = "com.yagay.YBrowser.extra.BIND_URL"
 private const val EXTRA_CHAT_BIND_TITLE = "com.yagay.YBrowser.extra.BIND_TITLE"
 private const val CHAT_BINDINGS_PREFS = "chatgpt_bindings"
+private const val CHAT_BINDINGS_LIST_KEY = "bindings_v2"
+private const val CHAT_BINDINGS_MIGRATED_KEY = "bindings_v2_migrated"
 
 private const val DOWNLOAD_CHANNEL_ID = "artifact_downloads"
 private const val DOWNLOAD_NOTIFICATION_ID = 4107
@@ -3709,6 +3712,83 @@ private fun isBindableChatGptUrl(url: String): Boolean {
 private fun normalizedRepoKey(repoKey: String): String =
     repoKey.trim().lowercase()
 
+private fun loadAllChatBindings(context: Context): List<ChatBinding> {
+    val prefs = context.getSharedPreferences(
+        CHAT_BINDINGS_PREFS,
+        Context.MODE_PRIVATE,
+    )
+    val stored = runCatching {
+        JSONArray(prefs.getString(CHAT_BINDINGS_LIST_KEY, "[]"))
+    }.getOrElse { JSONArray() }
+
+    val bindings = buildList {
+        for (index in 0 until stored.length()) {
+            val item = stored.optJSONObject(index) ?: continue
+            val repoKey = normalizedRepoKey(item.optString("repoKey"))
+            val url = normalizeChatBindingUrl(item.optString("url"))
+            if (repoKey.isBlank() || url.isBlank()) continue
+            add(
+                ChatBinding(
+                    repoKey = repoKey,
+                    title = item.optString("title").ifBlank { "ChatGPT" },
+                    url = url,
+                    addedAt = item.optLong("addedAt", 0L),
+                ),
+            )
+        }
+    }.toMutableList()
+
+    // Migrate the legacy one-binding-per-project format once.
+    if (!prefs.getBoolean(CHAT_BINDINGS_MIGRATED_KEY, false)) {
+        prefs.all.forEach { (key, value) ->
+            if (!key.endsWith(":url") || value !is String) return@forEach
+            val repoKey = normalizedRepoKey(key.removeSuffix(":url"))
+            val url = normalizeChatBindingUrl(value)
+            if (repoKey.isBlank() || url.isBlank()) return@forEach
+            if (bindings.none { sameChatBindingUrl(it.url, url) }) {
+                bindings += ChatBinding(
+                    repoKey = repoKey,
+                    title = prefs.getString(repoKey + ":title", null)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "ChatGPT",
+                    url = url,
+                    addedAt = 0L,
+                )
+            }
+        }
+        saveAllChatBindings(context, bindings)
+        prefs.edit().putBoolean(CHAT_BINDINGS_MIGRATED_KEY, true).apply()
+    }
+
+    return bindings
+        .distinctBy { normalizeChatBindingUrl(it.url) }
+        .sortedByDescending { it.addedAt }
+}
+
+private fun saveAllChatBindings(
+    context: Context,
+    bindings: List<ChatBinding>,
+) {
+    val array = JSONArray()
+    bindings
+        .distinctBy { normalizeChatBindingUrl(it.url) }
+        .sortedByDescending { it.addedAt }
+        .forEach { binding ->
+            array.put(
+                JSONObject()
+                    .put("repoKey", normalizedRepoKey(binding.repoKey))
+                    .put("title", binding.title.ifBlank { "ChatGPT" })
+                    .put("url", normalizeChatBindingUrl(binding.url))
+                    .put("addedAt", binding.addedAt),
+            )
+        }
+
+    context.getSharedPreferences(CHAT_BINDINGS_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(CHAT_BINDINGS_LIST_KEY, array.toString())
+        .apply()
+}
+
 private fun saveChatBinding(
     context: Context,
     repoKey: String,
@@ -3719,43 +3799,58 @@ private fun saveChatBinding(
     val normalizedUrl = normalizeChatBindingUrl(url)
     if (key.isBlank() || normalizedUrl.isBlank()) return
 
-    val prefs = context.getSharedPreferences(
-        CHAT_BINDINGS_PREFS,
-        Context.MODE_PRIVATE,
-    )
-    val editor = prefs.edit()
-
-    prefs.all.forEach { (prefKey, value) ->
-        if (
-            prefKey.endsWith(":url") &&
-            value is String &&
-            sameChatBindingUrl(value, normalizedUrl)
-        ) {
-            val otherKey = prefKey.removeSuffix(":url")
-            if (otherKey != key) {
-                editor.remove(otherKey + ":url")
-                editor.remove(otherKey + ":title")
-            }
-        }
+    val existing = loadAllChatBindings(context)
+    val sameBinding = existing.firstOrNull {
+        it.repoKey == key && sameChatBindingUrl(it.url, normalizedUrl)
     }
+    val addedAt = sameBinding?.addedAt?.takeIf { it > 0L }
+        ?: System.currentTimeMillis()
 
-    editor
-        .putString(key + ":url", normalizedUrl)
-        .putString(key + ":title", title.ifBlank { "ChatGPT" })
-        .apply()
+    // A ChatGPT page can belong to only one project.
+    val merged = buildList {
+        add(
+            ChatBinding(
+                repoKey = key,
+                title = title.ifBlank { "ChatGPT" },
+                url = normalizedUrl,
+                addedAt = addedAt,
+            ),
+        )
+        existing
+            .filterNot { sameChatBindingUrl(it.url, normalizedUrl) }
+            .forEach(::add)
+    }
+    saveAllChatBindings(context, merged)
 }
+
+private fun loadChatBindings(
+    context: Context,
+    owner: String,
+    repo: String,
+): List<ChatBinding> {
+    val repoKey = normalizedRepoKey(owner + "/" + repo)
+    return loadAllChatBindings(context)
+        .filter { it.repoKey == repoKey }
+        .sortedByDescending { it.addedAt }
+}
+
+private fun loadChatBinding(
+    context: Context,
+    owner: String,
+    repo: String,
+): ChatBinding? = loadChatBindings(context, owner, repo).firstOrNull()
 
 private fun removeChatBinding(
     context: Context,
-    repoKey: String,
+    url: String,
 ) {
-    val key = normalizedRepoKey(repoKey)
-    if (key.isBlank()) return
-    context.getSharedPreferences(CHAT_BINDINGS_PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .remove(key + ":url")
-        .remove(key + ":title")
-        .apply()
+    val normalizedUrl = normalizeChatBindingUrl(url)
+    if (normalizedUrl.isBlank()) return
+    saveAllChatBindings(
+        context,
+        loadAllChatBindings(context)
+            .filterNot { sameChatBindingUrl(it.url, normalizedUrl) },
+    )
 }
 
 private fun normalizeChatBindingUrl(url: String): String =
@@ -3763,29 +3858,6 @@ private fun normalizeChatBindingUrl(url: String): String =
 
 private fun sameChatBindingUrl(left: String, right: String): Boolean =
     normalizeChatBindingUrl(left) == normalizeChatBindingUrl(right)
-
-private fun loadChatBinding(
-    context: Context,
-    owner: String,
-    repo: String,
-): ChatBinding? {
-    val repoKey = normalizedRepoKey(owner + "/" + repo)
-    val prefs = context.getSharedPreferences(
-        CHAT_BINDINGS_PREFS,
-        Context.MODE_PRIVATE,
-    )
-    val url = prefs.getString(repoKey + ":url", null)
-        ?.takeIf { it.isNotBlank() }
-        ?: return null
-    val title = prefs.getString(repoKey + ":title", null)
-        ?.takeIf { it.isNotBlank() }
-        ?: "ChatGPT"
-    return ChatBinding(
-        repoKey = repoKey,
-        title = title,
-        url = url,
-    )
-}
 
 private fun startChatGptBinding(
     context: Context,
