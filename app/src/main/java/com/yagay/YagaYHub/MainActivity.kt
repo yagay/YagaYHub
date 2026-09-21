@@ -552,6 +552,11 @@ private fun HubScreen(
     var rootCleanupEnabled by remember { mutableStateOf(loadRootCleanupEnabled(context)) }
     var rootStatus by remember { mutableStateOf(RootStatus.NOT_CHECKED) }
     var layoutMode by remember { mutableStateOf(loadLayoutMode(context)) }
+    var sortMode by remember { mutableStateOf(loadSortMode(context)) }
+    var sortAscending by remember {
+        mutableStateOf(loadSortAscending(context, sortMode.defaultAscending))
+    }
+    var showSortDialog by remember { mutableStateOf(false) }
     var pendingInstallApk by remember { mutableStateOf<ExtractedApk?>(null) }
     var downloadUiState by remember { mutableStateOf(loadDownloadUiState(context)) }
     var showDownloadPanel by remember {
@@ -662,9 +667,23 @@ private fun HubScreen(
         }
     }
 
-    val visibleApps = remember(apps, query, filter) {
+    val bindingStats = remember(
+        chatBindingRevision,
+        bindingUiRevision,
+    ) {
+        buildAiBindingStats(loadAllChatBindings(context))
+    }
+
+    val visibleApps = remember(
+        apps,
+        query,
+        filter,
+        sortMode,
+        sortAscending,
+        bindingStats,
+    ) {
         val q = query.trim().lowercase()
-        apps.filter { app ->
+        val filtered = apps.filter { app ->
             val filterOk = when (filter) {
                 AppFilter.ALL -> true
                 AppFilter.INSTALLED -> app.installed
@@ -677,6 +696,77 @@ private fun HubScreen(
                 app.description.lowercase().contains(q)
             filterOk && queryOk
         }
+        sortHubApps(
+            apps = filtered,
+            mode = sortMode,
+            ascending = sortAscending,
+            bindingStats = bindingStats,
+        )
+    }
+
+    if (showSortDialog) {
+        AlertDialog(
+            onDismissRequest = { showSortDialog = false },
+            title = { Text("项目排序") },
+            text = {
+                Column {
+                    AppSortMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = sortMode == mode,
+                            onClick = {
+                                sortMode = mode
+                                sortAscending = mode.defaultAscending
+                                saveSortSettings(
+                                    context,
+                                    sortMode,
+                                    sortAscending,
+                                )
+                            },
+                            label = { Text(mode.label) },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "方向",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            selected = sortAscending,
+                            onClick = {
+                                sortAscending = true
+                                saveSortSettings(
+                                    context,
+                                    sortMode,
+                                    true,
+                                )
+                            },
+                            label = { Text("升序") },
+                        )
+                        FilterChip(
+                            selected = !sortAscending,
+                            onClick = {
+                                sortAscending = false
+                                saveSortSettings(
+                                    context,
+                                    sortMode,
+                                    false,
+                                )
+                            },
+                            label = { Text("降序") },
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSortDialog = false }) {
+                    Text("完成")
+                }
+            },
+        )
     }
 
     Scaffold { padding ->
@@ -737,6 +827,9 @@ private fun HubScreen(
                 }
                 TextButton(onClick = { showSettings = true }) {
                     Text("设置")
+                }
+                TextButton(onClick = { showSortDialog = true }) {
+                    Text("排序")
                 }
                 TextButton(
                     onClick = {
