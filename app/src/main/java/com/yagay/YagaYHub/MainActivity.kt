@@ -3837,6 +3837,8 @@ private const val EXTRA_CHAT_BIND_REPO = "com.yagay.YBrowser.extra.BIND_REPO"
 private const val EXTRA_CHAT_BIND_PROJECT = "com.yagay.YBrowser.extra.BIND_PROJECT"
 private const val EXTRA_CHAT_BIND_URL = "com.yagay.YBrowser.extra.BIND_URL"
 private const val EXTRA_CHAT_BIND_TITLE = "com.yagay.YBrowser.extra.BIND_TITLE"
+private const val EXTRA_CHAT_TARGETS_JSON =
+    "com.yagay.YBrowser.extra.CHAT_TARGETS_JSON"
 private const val CHAT_BINDINGS_PREFS = "chatgpt_bindings"
 private const val CHAT_BINDINGS_LIST_KEY = "bindings_v2"
 private const val CHAT_BINDINGS_MIGRATED_KEY = "bindings_v2_migrated"
@@ -4074,6 +4076,32 @@ private fun normalizeChatBindingUrl(url: String): String =
 private fun sameChatBindingUrl(left: String, right: String): Boolean =
     normalizeChatBindingUrl(left) == normalizeChatBindingUrl(right)
 
+private fun projectNameForBinding(binding: ChatBinding): String {
+    val repo = binding.repoKey.substringAfterLast('/')
+    return knownProjects.firstOrNull {
+        it.repo.equals(repo, ignoreCase = true)
+    }?.name ?: repo.ifBlank { "ChatGPT" }
+}
+
+private fun chatTargetsJson(
+    context: Context,
+): String {
+    val array = JSONArray()
+    loadAllChatBindings(context)
+        .sortedByDescending { it.addedAt }
+        .forEach { binding ->
+            array.put(
+                JSONObject()
+                    .put("repoKey", binding.repoKey)
+                    .put("project", projectNameForBinding(binding))
+                    .put("url", binding.url)
+                    .put("title", binding.title)
+                    .put("addedAt", binding.addedAt),
+            )
+        }
+    return array.toString()
+}
+
 private fun startChatGptBinding(
     context: Context,
     app: HubApp,
@@ -4145,6 +4173,7 @@ private fun openChatPopup(
     val intent = Intent(YBROWSER_OPEN_POPUP_ACTION).apply {
         setPackage(YBROWSER_PACKAGE)
         putExtra(YBROWSER_EXTRA_URL, url)
+        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
         if (!bindingRepoKey.isNullOrBlank()) {
             putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
             putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
