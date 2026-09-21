@@ -11,8 +11,8 @@ android {
         applicationId = "com.yagay.YagaYHub"
         minSdk = 31
         targetSdk = 37
-        versionCode = 19
-        versionName = "1.6.8"
+        versionCode = 20
+        versionName = "1.6.9"
 
         val githubClientId = providers
             .environmentVariable("YAGAY_GITHUB_CLIENT_ID")
