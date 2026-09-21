@@ -55,6 +55,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -834,21 +835,13 @@ private fun HubScreen(context: Context) {
                             clientId = clientId,
                             session = session,
                         )
-                        runCatching {
+                        try {
                             CustomTabsIntent.Builder()
                                 .setShowTitle(true)
                                 .build()
                                 .launchUrl(context, Uri.parse(authorizeUrl))
-                        }.onFailure {
-                            session.close()
-                            webAuthInProgress = false
-                            Toast.makeText(
-                                context,
-                                "无法打开 GitHub 登录界面",
-                                Toast.LENGTH_LONG,
-                            ).show()
-                        }.onSuccess {
-                            val token = withContext(Dispatchers.IO) {
+
+                            val token: String? = withContext(Dispatchers.IO) {
                                 completeGithubWebAuth(
                                     session = session,
                                     clientId = clientId,
@@ -872,6 +865,14 @@ private fun HubScreen(context: Context) {
                                     Toast.LENGTH_LONG,
                                 ).show()
                             }
+                        } catch (_: Exception) {
+                            session.close()
+                            webAuthInProgress = false
+                            Toast.makeText(
+                                context,
+                                "无法打开 GitHub 登录界面",
+                                Toast.LENGTH_LONG,
+                            ).show()
                         }
                     }
                 }
