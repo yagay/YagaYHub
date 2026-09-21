@@ -2,8 +2,11 @@
 
 YagaYHub 是 YagaY Android 项目的统一入口中心。打开后可以查看自己的项目、安装状态和版本，并直接启动已经安装且带 Launcher Activity 的 App。
 
-## 1.6.6
+## 1.6.7
 
+- 新增 GitHub 网页登录授权：使用 Chrome Custom Tab 打开 GitHub 登录/授权页面，授权完成后自动返回 YagaYHub。
+- 网页登录使用 Authorization Code + PKCE，并通过本机 loopback `127.0.0.1` 临时端口接收回调；GitHub App Callback URL 需配置为 `http://127.0.0.1/oauth/callback`。
+- GitHub App Client Secret 仅保存在本机，使用 Android Keystore + AES/GCM 加密；Device Flow 与 Fine-grained Token 继续作为备用方式。
 - Actions artifact 下载改为 `ForegroundService` 后台任务，离开 YagaYHub 后仍可继续下载。
 - 通知栏实时显示下载阶段、进度百分比、已下载/总大小；下载完成后保留完成通知，点击可回到 YagaYHub。
 - Android 13+ 首次下载会请求通知权限；未授权时下载仍继续，但通知栏进度可能不可见。
