@@ -4065,7 +4065,7 @@ private fun removeChatBinding(
 }
 
 private fun normalizeChatBindingUrl(url: String): String =
-    url.substringBefore('#').trim().trimEnd('/')
+    url.trim().trimEnd('/')
 
 private fun sameChatBindingUrl(left: String, right: String): Boolean =
     normalizeChatBindingUrl(left) == normalizeChatBindingUrl(right)
