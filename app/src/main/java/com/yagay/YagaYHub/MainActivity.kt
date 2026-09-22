@@ -949,29 +949,6 @@ private fun HubScreen(
                     )
                 }
                 IconButton(
-                    onClick = {
-                        downloadHistory = loadDownloadHistory(context)
-                        showDownloadHistory = true
-                    },
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.Download,
-                        contentDescription = "下载",
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                IconButton(
-                    onClick = { showSettings = true },
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.Settings,
-                        contentDescription = "设置",
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                IconButton(
                     onClick = { showSortDialog = true },
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -1014,6 +991,29 @@ private fun HubScreen(
                     Icon(
                         Icons.Outlined.Refresh,
                         contentDescription = "刷新",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        downloadHistory = loadDownloadHistory(context)
+                        showDownloadHistory = true
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Download,
+                        contentDescription = "下载",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                IconButton(
+                    onClick = { showSettings = true },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Settings,
+                        contentDescription = "设置",
                         modifier = Modifier.size(20.dp),
                     )
                 }
