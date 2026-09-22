@@ -559,6 +559,7 @@ private fun HubScreen(
     var refreshKey by remember { mutableStateOf(0) }
     var isRefreshing by remember { mutableStateOf(false) }
     var initialLoadCompleted by remember { mutableStateOf(false) }
+    var scrollToTopRevision by remember { mutableIntStateOf(0) }
     var isAutoRefreshing by remember { mutableStateOf(false) }
     var autoRefreshCursor by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
@@ -742,7 +743,8 @@ private fun HubScreen(
     }
 
     LaunchedEffect(refreshKey, githubToken) {
-        val isInitialLoad = !initialLoadCompleted
+        val shouldScrollToTop =
+            !initialLoadCompleted || isRefreshing
         try {
             val loadedApps = loadHubApps(context)
             val mergedApps = withContext(Dispatchers.IO) {
@@ -755,12 +757,8 @@ private fun HubScreen(
             apps = withContext(Dispatchers.IO) {
                 loadActionsStatuses(mergedApps, githubToken)
             }
-            if (isInitialLoad) {
-                if (layoutMode == LayoutMode.LIST) {
-                    appListState.scrollToItem(0)
-                } else {
-                    appGridState.scrollToItem(0)
-                }
+            if (shouldScrollToTop) {
+                scrollToTopRevision++
             }
         } finally {
             initialLoadCompleted = true
@@ -770,13 +768,6 @@ private fun HubScreen(
 
     val requestRefresh: () -> Unit = {
         if (!isRefreshing && !isAutoRefreshing) {
-            scope.launch {
-                if (layoutMode == LayoutMode.LIST) {
-                    appListState.scrollToItem(0)
-                } else {
-                    appGridState.scrollToItem(0)
-                }
-            }
             isRefreshing = true
             refreshKey++
         }
@@ -847,6 +838,19 @@ private fun HubScreen(
             ascending = sortAscending,
             bindingStats = bindingStats,
         )
+    }
+
+    LaunchedEffect(
+        scrollToTopRevision,
+        layoutMode,
+        visibleApps.size,
+    ) {
+        if (scrollToTopRevision <= 0) return@LaunchedEffect
+        if (layoutMode == LayoutMode.LIST) {
+            appListState.scrollToItem(0, 0)
+        } else {
+            appGridState.scrollToItem(0, 0)
+        }
     }
 
     if (showSortDialog) {
