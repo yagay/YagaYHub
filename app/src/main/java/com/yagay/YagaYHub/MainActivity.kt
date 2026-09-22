@@ -587,6 +587,7 @@ private fun HubScreen(
         mutableStateOf(loadSortAscending(context, sortMode.defaultAscending))
     }
     var showSortDialog by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
     var pendingInstallApk by remember { mutableStateOf<ExtractedApk?>(null) }
     var downloadUiState by remember { mutableStateOf(loadDownloadUiState(context)) }
     var downloadHistory by remember { mutableStateOf(loadDownloadHistory(context)) }
@@ -892,6 +893,21 @@ private fun HubScreen(
         )
     }
 
+    if (showAboutDialog) {
+        AlertDialog(
+            onDismissRequest = { showAboutDialog = false },
+            title = { Text("YagaYHub") },
+            text = {
+                Text("单击打开 · 长按详情 · Actions 一键构建入口")
+            },
+            confirmButton = {
+                TextButton(onClick = { showAboutDialog = false }) {
+                    Text("知道了")
+                }
+            },
+        )
+    }
+
     Scaffold { padding ->
         Column(
             modifier = Modifier
@@ -904,26 +920,15 @@ private fun HubScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        "YagaYHub",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                    )
-                    Text(
-                        "· 单击打开 · 长按详情 · Actions 一键构建入口",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Text(
+                    "YagaYHub",
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { showAboutDialog = true },
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
                 IconButton(
                     onClick = {
                         val bindings = loadAllChatBindings(context)
