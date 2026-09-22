@@ -1515,8 +1515,21 @@ private fun HubScreen(
     if (showDownloadPanel && downloadUiState != null) {
         DownloadPanel(
             state = downloadUiState!!,
-            onDismiss = { showDownloadPanel = false },
+            onDismiss = {
+                showDownloadPanel = false
+                if (downloadUiState?.running != true) {
+                    clearDownloadUiState(context)
+                    downloadUiState = null
+                }
+            },
             onInstall = { apk ->
+                // Installing is the terminal action for a completed download.
+                // Close immediately and forget the persisted completion panel so
+                // an app update/restart cannot resurrect the old dialog.
+                showDownloadPanel = false
+                clearDownloadUiState(context)
+                downloadUiState = null
+
                 if (
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
                     !context.packageManager.canRequestPackageInstalls()
@@ -2101,6 +2114,13 @@ private fun saveDownloadUiState(context: Context, state: DownloadUiState) {
     context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
         .edit()
         .putString(DOWNLOAD_STATE_JSON, json.toString())
+        .apply()
+}
+
+private fun clearDownloadUiState(context: Context) {
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .remove(DOWNLOAD_STATE_JSON)
         .apply()
 }
 
