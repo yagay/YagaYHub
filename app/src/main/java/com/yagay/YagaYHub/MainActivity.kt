@@ -935,15 +935,13 @@ private fun HubScreen(
                         modifier = Modifier.size(24.dp),
                     )
                 }
-                if (downloadUiState != null || downloadHistory.isNotEmpty()) {
-                    TextButton(
-                        onClick = {
-                            downloadHistory = loadDownloadHistory(context)
-                            showDownloadHistory = true
-                        },
-                    ) {
-                        Text("下载")
-                    }
+                TextButton(
+                    onClick = {
+                        downloadHistory = loadDownloadHistory(context)
+                        showDownloadHistory = true
+                    },
+                ) {
+                    Text("下载")
                 }
                 TextButton(onClick = { showSettings = true }) {
                     Text("设置")
