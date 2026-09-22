@@ -2278,6 +2278,73 @@ private fun updateDownloadNotification(
         .notify(DOWNLOAD_NOTIFICATION_ID, buildDownloadNotification(context, state))
 }
 
+
+private fun downloadTaskNotificationId(
+    artifactId: Long,
+): Int =
+    20_000 + (artifactId xor (artifactId ushr 32))
+        .toInt()
+        .and(0x3fff)
+
+private fun updateDownloadTaskNotification(
+    context: Context,
+    artifactId: Long,
+    state: DownloadUiState,
+) {
+    context.getSystemService(NotificationManager::class.java)
+        .notify(
+            downloadTaskNotificationId(artifactId),
+            buildDownloadNotification(context, state),
+        )
+}
+
+private fun buildDownloadSummaryNotification(
+    context: Context,
+    activeCount: Int,
+): Notification {
+    val openAppIntent = Intent(
+        context,
+        MainActivity::class.java,
+    ).apply {
+        addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP,
+        )
+    }
+    val pendingIntent = PendingIntent.getActivity(
+        context,
+        1002,
+        openAppIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or
+            PendingIntent.FLAG_IMMUTABLE,
+    )
+    return Notification.Builder(
+        context,
+        DOWNLOAD_CHANNEL_ID,
+    )
+        .setSmallIcon(android.R.drawable.stat_sys_download)
+        .setContentTitle("YagaYHub · 并行下载")
+        .setContentText("正在下载 " + activeCount + " 个任务")
+        .setContentIntent(pendingIntent)
+        .setOnlyAlertOnce(true)
+        .setOngoing(true)
+        .build()
+}
+
+private fun updateDownloadSummaryNotification(
+    context: Context,
+    activeCount: Int,
+) {
+    context.getSystemService(NotificationManager::class.java)
+        .notify(
+            DOWNLOAD_NOTIFICATION_ID,
+            buildDownloadSummaryNotification(
+                context,
+                activeCount,
+            ),
+        )
+}
+
 private fun broadcastDownloadState(
     context: Context,
     state: DownloadUiState,
@@ -3902,123 +3969,759 @@ private data class DownloadResult(
     val extractedApks: List<ExtractedApk> = emptyList(),
 )
 
+private data class TempArtifactDownload(
+    val file: File,
+    val metaFile: File,
+    val totalBytes: Long?,
+    val threadCount: Int,
+    val resumed: Boolean,
+)
+
+private data class TempDownloadResult(
+    val temp: TempArtifactDownload?,
+    val message: String,
+)
+
+private data class RangeProbe(
+    val supportsRange: Boolean,
+    val totalBytes: Long?,
+)
+
+private data class DownloadSegment(
+    val start: Long,
+    val end: Long,
+) {
+    val length: Long
+        get() = end - start + 1L
+}
+
+private fun resolveArtifactDownloadUrl(
+    owner: String,
+    repo: String,
+    artifactId: Long,
+    token: String,
+): String? {
+    val apiUrl =
+        "https://api.github.com/repos/" + owner + "/" +
+            repo + "/actions/artifacts/" + artifactId + "/zip"
+    var connection: HttpURLConnection? = null
+    return try {
+        connection = githubGet(
+            url = apiUrl,
+            token = token,
+            followRedirects = false,
+        )
+        when (connection.responseCode) {
+            in 300..399 ->
+                connection.getHeaderField("Location")
+            in 200..299 ->
+                apiUrl
+            else ->
+                null
+        }
+    } finally {
+        connection?.disconnect()
+    }
+}
+
+private fun openArtifactDataConnection(
+    url: String,
+    token: String,
+    range: String? = null,
+): HttpURLConnection =
+    (URL(url).openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        connectTimeout = 12_000
+        readTimeout = 60_000
+        instanceFollowRedirects = true
+        useCaches = false
+        defaultUseCaches = false
+        setRequestProperty("Cache-Control", "no-store, no-cache")
+        setRequestProperty("Pragma", "no-cache")
+        setRequestProperty("User-Agent", "YagaYHub")
+        range?.let {
+            setRequestProperty("Range", it)
+        }
+        if (
+            token.isNotBlank() &&
+            runCatching {
+                URL(url).host.equals(
+                    "api.github.com",
+                    ignoreCase = true,
+                )
+            }.getOrDefault(false)
+        ) {
+            setRequestProperty(
+                "Authorization",
+                "Bearer " + token,
+            )
+            setRequestProperty(
+                "Accept",
+                "application/vnd.github+json",
+            )
+        }
+    }
+
+private fun probeArtifactRange(
+    owner: String,
+    repo: String,
+    artifactId: Long,
+    token: String,
+): RangeProbe? {
+    repeat(DOWNLOAD_RETRY_COUNT) { attempt ->
+        val url = resolveArtifactDownloadUrl(
+            owner,
+            repo,
+            artifactId,
+            token,
+        )
+        if (url.isNullOrBlank()) {
+            if (attempt + 1 < DOWNLOAD_RETRY_COUNT) {
+                Thread.sleep(700L * (attempt + 1L))
+            }
+            return@repeat
+        }
+
+        var connection: HttpURLConnection? = null
+        try {
+            connection = openArtifactDataConnection(
+                url = url,
+                token = token,
+                range = "bytes=0-0",
+            )
+            val code = connection.responseCode
+            if (code == HttpURLConnection.HTTP_PARTIAL) {
+                val contentRange =
+                    connection.getHeaderField("Content-Range")
+                        .orEmpty()
+                val total = contentRange
+                    .substringAfterLast('/', "")
+                    .toLongOrNull()
+                return RangeProbe(
+                    supportsRange = true,
+                    totalBytes = total,
+                )
+            }
+            if (code in 200..299) {
+                return RangeProbe(
+                    supportsRange = false,
+                    totalBytes = connection.contentLengthLong
+                        .takeIf { it > 0L },
+                )
+            }
+        } catch (_: Exception) {
+            Unit
+        } finally {
+            connection?.disconnect()
+        }
+
+        if (attempt + 1 < DOWNLOAD_RETRY_COUNT) {
+            Thread.sleep(700L * (attempt + 1L))
+        }
+    }
+    return null
+}
+
+private fun buildDownloadSegments(
+    totalBytes: Long,
+    threadCount: Int,
+): List<DownloadSegment> {
+    val size =
+        (totalBytes + threadCount - 1L) / threadCount
+    return (0 until threadCount).mapNotNull { index ->
+        val start = index * size
+        if (start >= totalBytes) {
+            null
+        } else {
+            DownloadSegment(
+                start = start,
+                end = minOf(
+                    totalBytes - 1L,
+                    start + size - 1L,
+                ),
+            )
+        }
+    }
+}
+
+private fun loadResumeCounters(
+    metaFile: File,
+    artifactId: Long,
+    totalBytes: Long,
+    segments: List<DownloadSegment>,
+): LongArray? {
+    if (!metaFile.exists()) return null
+    return runCatching {
+        val json = JSONObject(metaFile.readText())
+        if (
+            json.optLong("artifactId") != artifactId ||
+            json.optLong("totalBytes") != totalBytes
+        ) {
+            return@runCatching null
+        }
+        val array = json.optJSONArray("segments")
+            ?: return@runCatching null
+        if (array.length() != segments.size) {
+            return@runCatching null
+        }
+
+        LongArray(segments.size) { index ->
+            val item = array.getJSONObject(index)
+            val segment = segments[index]
+            if (
+                item.optLong("start") != segment.start ||
+                item.optLong("end") != segment.end
+            ) {
+                return@runCatching null
+            }
+            item.optLong("downloaded", 0L)
+                .coerceIn(0L, segment.length)
+        }
+    }.getOrNull()
+}
+
+private fun saveResumeCounters(
+    metaFile: File,
+    artifactId: Long,
+    totalBytes: Long,
+    segments: List<DownloadSegment>,
+    counters: AtomicLongArray,
+) {
+    val json = JSONObject()
+        .put("artifactId", artifactId)
+        .put("totalBytes", totalBytes)
+        .put(
+            "segments",
+            JSONArray().apply {
+                segments.forEachIndexed { index, segment ->
+                    put(
+                        JSONObject()
+                            .put("start", segment.start)
+                            .put("end", segment.end)
+                            .put(
+                                "downloaded",
+                                counters.get(index),
+                            )
+                    )
+                }
+            },
+        )
+    metaFile.parentFile?.mkdirs()
+    metaFile.writeText(json.toString())
+}
+
+private fun downloadArtifactToTemp(
+    context: Context,
+    owner: String,
+    repo: String,
+    artifactId: Long,
+    token: String,
+    expectedSizeBytes: Long?,
+    onProgress: (Long, Long?, String) -> Unit,
+): TempDownloadResult {
+    val partDir = File(
+        context.filesDir,
+        "artifact_parts",
+    ).apply { mkdirs() }
+    val key = (
+        owner + "_" + repo + "_" + artifactId
+        )
+        .replace(Regex("[^A-Za-z0-9._-]"), "_")
+    val partFile = File(partDir, key + ".part")
+    val metaFile = File(partDir, key + ".json")
+
+    onProgress(
+        0L,
+        expectedSizeBytes,
+        "检查断点与服务器分段支持…",
+    )
+    val probe = probeArtifactRange(
+        owner,
+        repo,
+        artifactId,
+        token,
+    ) ?: return TempDownloadResult(
+        temp = null,
+        message = "无法连接 GitHub 下载地址",
+    )
+
+    val totalBytes =
+        probe.totalBytes ?: expectedSizeBytes
+
+    if (
+        probe.supportsRange &&
+        totalBytes != null &&
+        totalBytes > 0L
+    ) {
+        val threadCount = minOf(
+            DOWNLOAD_SEGMENT_THREADS,
+            maxOf(
+                1,
+                (
+                    (totalBytes + DOWNLOAD_MIN_SEGMENT_BYTES - 1L) /
+                        DOWNLOAD_MIN_SEGMENT_BYTES
+                    ).toInt(),
+            ),
+        )
+        val segments = buildDownloadSegments(
+            totalBytes,
+            threadCount,
+        )
+        val restored = loadResumeCounters(
+            metaFile,
+            artifactId,
+            totalBytes,
+            segments,
+        )
+        val resumed = restored?.any { it > 0L } == true
+        val counters = AtomicLongArray(segments.size)
+
+        if (
+            restored == null ||
+            !partFile.exists()
+        ) {
+            partFile.delete()
+            metaFile.delete()
+            RandomAccessFile(partFile, "rw").use {
+                it.setLength(totalBytes)
+            }
+        } else {
+            RandomAccessFile(partFile, "rw").use {
+                if (it.length() != totalBytes) {
+                    it.setLength(totalBytes)
+                }
+            }
+        }
+        segments.indices.forEach { index ->
+            counters.set(
+                index,
+                restored?.get(index) ?: 0L,
+            )
+        }
+        saveResumeCounters(
+            metaFile,
+            artifactId,
+            totalBytes,
+            segments,
+            counters,
+        )
+
+        val lock = Any()
+        val errors = mutableListOf<String>()
+        var lastProgressAt = 0L
+        var lastMetaAt = 0L
+        val latch = CountDownLatch(segments.size)
+
+        fun publishProgress(force: Boolean = false) {
+            synchronized(lock) {
+                val now = System.currentTimeMillis()
+                if (
+                    force ||
+                    now - lastProgressAt >= 120L
+                ) {
+                    var downloaded = 0L
+                    for (index in segments.indices) {
+                        downloaded += counters.get(index)
+                    }
+                    onProgress(
+                        downloaded,
+                        totalBytes,
+                        if (resumed) {
+                            "断点续传 · " +
+                                segments.size +
+                                " 线程…"
+                        } else {
+                            "多线程下载 · " +
+                                segments.size +
+                                " 线程…"
+                        },
+                    )
+                    lastProgressAt = now
+                }
+                if (
+                    force ||
+                    now - lastMetaAt >= 500L
+                ) {
+                    runCatching {
+                        saveResumeCounters(
+                            metaFile,
+                            artifactId,
+                            totalBytes,
+                            segments,
+                            counters,
+                        )
+                    }
+                    lastMetaAt = now
+                }
+            }
+        }
+
+        segments.forEachIndexed { index, segment ->
+            Thread {
+                try {
+                    var retries = 0
+                    while (
+                        counters.get(index) < segment.length
+                    ) {
+                        val done = counters.get(index)
+                        val from = segment.start + done
+                        val url = resolveArtifactDownloadUrl(
+                            owner,
+                            repo,
+                            artifactId,
+                            token,
+                        ) ?: throw IllegalStateException(
+                            "无法刷新 GitHub 下载地址",
+                        )
+                        var connection: HttpURLConnection? = null
+                        try {
+                            connection = openArtifactDataConnection(
+                                url = url,
+                                token = token,
+                                range =
+                                    "bytes=" + from + "-" +
+                                        segment.end,
+                            )
+                            val code = connection.responseCode
+                            if (
+                                code !=
+                                HttpURLConnection.HTTP_PARTIAL
+                            ) {
+                                throw IllegalStateException(
+                                    "服务器未返回 206 分段响应：" +
+                                        code,
+                                )
+                            }
+
+                            RandomAccessFile(
+                                partFile,
+                                "rw",
+                            ).use { output ->
+                                output.seek(from)
+                                connection.inputStream.use { input ->
+                                    val buffer =
+                                        ByteArray(128 * 1024)
+                                    while (
+                                        counters.get(index) <
+                                        segment.length
+                                    ) {
+                                        val remaining =
+                                            segment.length -
+                                                counters.get(index)
+                                        val read = input.read(
+                                            buffer,
+                                            0,
+                                            minOf(
+                                                buffer.size.toLong(),
+                                                remaining,
+                                            ).toInt(),
+                                        )
+                                        if (read < 0) break
+                                        output.write(
+                                            buffer,
+                                            0,
+                                            read,
+                                        )
+                                        counters.addAndGet(
+                                            index,
+                                            read.toLong(),
+                                        )
+                                        publishProgress()
+                                    }
+                                }
+                            }
+
+                            if (
+                                counters.get(index) <
+                                segment.length
+                            ) {
+                                throw IllegalStateException(
+                                    "分段连接提前结束",
+                                )
+                            }
+                            retries = 0
+                        } catch (error: Exception) {
+                            retries++
+                            if (
+                                retries >= DOWNLOAD_RETRY_COUNT
+                            ) {
+                                throw error
+                            }
+                            Thread.sleep(
+                                900L * retries,
+                            )
+                        } finally {
+                            connection?.disconnect()
+                        }
+                    }
+                } catch (error: Exception) {
+                    synchronized(lock) {
+                        errors += (
+                            "分段 " + (index + 1) + ": " +
+                                (
+                                    error.message
+                                        ?: "未知错误"
+                                    )
+                            )
+                    }
+                } finally {
+                    publishProgress(force = true)
+                    latch.countDown()
+                }
+            }.apply {
+                name =
+                    "YagaYHub-Range-" +
+                        artifactId + "-" + index
+                start()
+            }
+        }
+
+        latch.await()
+        publishProgress(force = true)
+
+        if (errors.isNotEmpty()) {
+            return TempDownloadResult(
+                temp = null,
+                message =
+                    "下载中断，断点已保留：" +
+                        errors.first(),
+            )
+        }
+
+        val complete = segments.indices.all { index ->
+            counters.get(index) >= segments[index].length
+        }
+        if (!complete) {
+            return TempDownloadResult(
+                temp = null,
+                message = "下载未完整，断点已保留",
+            )
+        }
+
+        return TempDownloadResult(
+            temp = TempArtifactDownload(
+                file = partFile,
+                metaFile = metaFile,
+                totalBytes = totalBytes,
+                threadCount = segments.size,
+                resumed = resumed,
+            ),
+            message = "下载完成",
+        )
+    }
+
+    // 极少数不支持 Range 的服务器自动降级为单线程。
+    partFile.delete()
+    metaFile.delete()
+    repeat(DOWNLOAD_RETRY_COUNT) { attempt ->
+        val url = resolveArtifactDownloadUrl(
+            owner,
+            repo,
+            artifactId,
+            token,
+        )
+        if (url.isNullOrBlank()) {
+            if (attempt + 1 < DOWNLOAD_RETRY_COUNT) {
+                Thread.sleep(900L * (attempt + 1L))
+            }
+            return@repeat
+        }
+
+        var connection: HttpURLConnection? = null
+        try {
+            connection = openArtifactDataConnection(
+                url,
+                token,
+            )
+            if (connection.responseCode !in 200..299) {
+                throw IllegalStateException(
+                    "HTTP " + connection.responseCode,
+                )
+            }
+            val total =
+                connection.contentLengthLong
+                    .takeIf { it > 0L }
+                    ?: totalBytes
+            var copied = 0L
+            partFile.outputStream().buffered().use { output ->
+                connection.inputStream.use { input ->
+                    val buffer = ByteArray(128 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        copied += read
+                        onProgress(
+                            copied,
+                            total,
+                            "单线程下载（服务器不支持 Range）…",
+                        )
+                    }
+                }
+            }
+            return TempDownloadResult(
+                temp = TempArtifactDownload(
+                    file = partFile,
+                    metaFile = metaFile,
+                    totalBytes = total,
+                    threadCount = 1,
+                    resumed = false,
+                ),
+                message = "下载完成",
+            )
+        } catch (_: Exception) {
+            partFile.delete()
+            if (attempt + 1 < DOWNLOAD_RETRY_COUNT) {
+                Thread.sleep(900L * (attempt + 1L))
+            }
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    return TempDownloadResult(
+        temp = null,
+        message =
+            "下载失败；服务器不支持断点续传，重试仍失败",
+    )
+}
+
+private fun sanitizeArtifactZipName(
+    repo: String,
+    artifactName: String,
+    artifactId: Long,
+): String {
+    val cleanArtifact = artifactName
+        .removeSuffix(".zip")
+        .replace(Regex("[\\/:*?\"<>|]"), "_")
+        .trim()
+        .take(100)
+        .ifBlank { artifactId.toString() }
+    val cleanRepo = repo
+        .replace(Regex("[\\/:*?\"<>|]"), "_")
+        .trim()
+        .take(60)
+        .ifBlank { "artifact" }
+    return cleanRepo + "-" + cleanArtifact + ".zip"
+}
+
 private fun downloadArtifactZip(
     context: Context,
     owner: String,
     repo: String,
     runId: Long,
     artifactId: Long,
+    artifactName: String,
     token: String,
     destinationTreeUri: String,
     rootEnhancedCleanup: Boolean,
     expectedSizeBytes: Long? = null,
-    onProgress: (Long, Long?, String) -> Unit = { _, _, _ -> },
+    onProgress: (Long, Long?, String) -> Unit =
+        { _, _, _ -> },
 ): DownloadResult {
-    var apiConnection: HttpURLConnection? = null
-    var downloadConnection: HttpURLConnection? = null
     var outputUri: Uri? = null
 
     return try {
-        onProgress(0L, expectedSizeBytes, "连接 GitHub…")
-        apiConnection = githubGet(
-            url = "https://api.github.com/repos/" + owner + "/" + repo +
-                "/actions/artifacts/" + artifactId + "/zip",
+        val tempResult = downloadArtifactToTemp(
+            context = context,
+            owner = owner,
+            repo = repo,
+            artifactId = artifactId,
             token = token,
-            followRedirects = false,
+            expectedSizeBytes = expectedSizeBytes,
+            onProgress = onProgress,
         )
-
-        val apiCode = apiConnection.responseCode
-        val streamConnection = when {
-            apiCode in 300..399 -> {
-                val location = apiConnection.getHeaderField("Location")
-                    ?: return DownloadResult(false, "GitHub 未返回 ZIP 下载地址")
-                (URL(location).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 10_000
-                    readTimeout = 60_000
-                    instanceFollowRedirects = true
-                    useCaches = false
-                    defaultUseCaches = false
-                    setRequestProperty("Cache-Control", "no-store, no-cache")
-                    setRequestProperty("Pragma", "no-cache")
-                }.also { downloadConnection = it }
-            }
-            apiCode in 200..299 -> apiConnection
-            apiCode == 401 || apiCode == 403 ->
-                return DownloadResult(false, "Token 无效或缺少 Actions 读取权限")
-            else ->
-                return DownloadResult(false, "下载失败：GitHub HTTP " + apiCode)
-        }
-
-        if (streamConnection !== apiConnection) {
-            val downloadCode = streamConnection.responseCode
-            if (downloadCode !in 200..299) {
-                return DownloadResult(false, "ZIP 下载失败：HTTP " + downloadCode)
-            }
-        }
-
-        val fileName = repo + ".zip"
-        val rootDirectory = if (rootEnhancedCleanup) {
-            resolveDownloadPhysicalDirectory(destinationTreeUri)
-        } else {
-            null
-        }
-        val rootCleanupApplied = rootDirectory?.let { directory ->
-            rootCleanupDownloadDirectory(
-                context = context,
-                directory = directory,
-                repo = repo,
-                keepCurrentZip = false,
+        val temp = tempResult.temp
+            ?: return DownloadResult(
+                false,
+                tempResult.message,
             )
-        } == true
 
-        val destination = if (destinationTreeUri.isBlank()) {
-            prepareDefaultDownloadDestination(context, fileName)
-        } else {
-            prepareTreeDownloadDestination(
-                context = context,
-                treeUriString = destinationTreeUri,
-                fileName = fileName,
+        val fileName = sanitizeArtifactZipName(
+            repo,
+            artifactName,
+            artifactId,
+        )
+        val rootDirectory =
+            if (rootEnhancedCleanup) {
+                resolveDownloadPhysicalDirectory(
+                    destinationTreeUri,
+                )
+            } else {
+                null
+            }
+
+        val destination =
+            if (destinationTreeUri.isBlank()) {
+                prepareDefaultDownloadDestination(
+                    context,
+                    fileName,
+                )
+            } else {
+                prepareTreeDownloadDestination(
+                    context = context,
+                    treeUriString = destinationTreeUri,
+                    fileName = fileName,
+                )
+            } ?: return DownloadResult(
+                false,
+                "无法创建下载文件",
             )
-        } ?: return DownloadResult(false, "无法创建下载文件")
 
         outputUri = destination.uri
-        val totalBytes = streamConnection.contentLengthLong
-            .takeIf { it > 0L }
-            ?: expectedSizeBytes
-        var copiedBytes = 0L
-        var lastProgressUpdate = 0L
-        context.contentResolver.openOutputStream(destination.uri, "w")?.use { output ->
-            streamConnection.inputStream.use { input ->
-                val buffer = ByteArray(64 * 1024)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    output.write(buffer, 0, read)
-                    copiedBytes += read
-                    val now = System.currentTimeMillis()
-                    if (now - lastProgressUpdate >= 120L) {
-                        onProgress(copiedBytes, totalBytes, "下载 ZIP…")
-                        lastProgressUpdate = now
+        onProgress(
+            temp.totalBytes ?: temp.file.length(),
+            temp.totalBytes,
+            "写入下载目录…",
+        )
+        context.contentResolver
+            .openOutputStream(
+                destination.uri,
+                "w",
+            )
+            ?.use { output ->
+                temp.file.inputStream()
+                    .buffered()
+                    .use { input ->
+                        input.copyTo(
+                            output,
+                            256 * 1024,
+                        )
                     }
-                }
-                output.flush()
             }
-        } ?: return DownloadResult(false, "无法写入下载文件")
-        onProgress(copiedBytes, totalBytes, "ZIP 下载完成")
+            ?: return DownloadResult(
+                false,
+                "无法写入下载文件",
+            )
 
         destination.finish?.invoke()
-        onProgress(copiedBytes, totalBytes, "解压 APK…")
+        onProgress(
+            temp.totalBytes ?: temp.file.length(),
+            temp.totalBytes,
+            "解压 APK…",
+        )
 
         val extractedApks = extractApksFromZip(
             context = context,
             zipUri = destination.uri,
             destinationTreeUri = destinationTreeUri,
-            rootDirectory = if (rootEnhancedCleanup) rootDirectory else null,
+            rootDirectory =
+                if (rootEnhancedCleanup) {
+                    rootDirectory
+                } else {
+                    null
+                },
         )
 
-        if (rootCleanupApplied && rootDirectory != null) {
-            onProgress(copiedBytes, totalBytes, "Root 清理…")
+        if (
+            rootEnhancedCleanup &&
+            rootDirectory != null
+        ) {
+            onProgress(
+                temp.totalBytes ?: temp.file.length(),
+                temp.totalBytes,
+                "Root 清理…",
+            )
             rootCleanupDownloadDirectory(
                 context = context,
                 directory = rootDirectory,
@@ -4027,12 +4730,25 @@ private fun downloadArtifactZip(
             )
         }
 
-        onProgress(copiedBytes, totalBytes, "完成")
+        temp.file.delete()
+        temp.metaFile.delete()
+
+        onProgress(
+            temp.totalBytes ?: 0L,
+            temp.totalBytes,
+            "完成",
+        )
         DownloadResult(
             success = true,
             message = buildString {
                 append("已保存到 ")
                 append(destination.displayPath)
+                append(" · ")
+                append(temp.threadCount)
+                append(" 线程")
+                if (temp.resumed) {
+                    append(" · 已断点续传")
+                }
                 if (extractedApks.isNotEmpty()) {
                     append(" · 已解压 ")
                     append(extractedApks.size)
@@ -4040,23 +4756,25 @@ private fun downloadArtifactZip(
                 } else {
                     append(" · ZIP 内未发现 APK")
                 }
-                if (rootCleanupApplied) append(" · Root 清理完成")
             },
             extractedApks = extractedApks,
         )
-    } catch (e: Exception) {
+    } catch (error: Exception) {
         outputUri?.let { uri ->
-            runCatching { context.contentResolver.delete(uri, null, null) }
+            runCatching {
+                context.contentResolver.delete(
+                    uri,
+                    null,
+                    null,
+                )
+            }
         }
         DownloadResult(
             false,
-            "下载失败：" + (e.message ?: "未知错误"),
+            "下载失败：" +
+                (error.message ?: "未知错误") +
+                "；断点文件已保留",
         )
-    } finally {
-        if (downloadConnection !== apiConnection) {
-            downloadConnection?.disconnect()
-        }
-        apiConnection?.disconnect()
     }
 }
 
@@ -5103,6 +5821,9 @@ private const val SORT_ASCENDING = "sort_ascending"
 private const val DOWNLOAD_STATE_JSON = "download_state_json"
 private const val DOWNLOAD_HISTORY_JSON = "download_history_json"
 private const val DOWNLOAD_HISTORY_LIMIT = 50
+private const val DOWNLOAD_SEGMENT_THREADS = 4
+private const val DOWNLOAD_RETRY_COUNT = 4
+private const val DOWNLOAD_MIN_SEGMENT_BYTES = 2L * 1024L * 1024L
 private const val TOKEN_KEY_ALIAS = "YagaYHubGitHubToken"
 
 private fun getPackageInfoCompat(pm: PackageManager, packageName: String): PackageInfo? = runCatching {
