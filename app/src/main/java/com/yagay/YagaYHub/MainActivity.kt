@@ -1046,19 +1046,10 @@ private fun HubScreen(
                 )
                 IconButton(
                     onClick = {
-                        val bindings = loadAllChatBindings(context)
-                        if (bindings.isEmpty()) {
-                            Toast.makeText(
-                                context,
-                                "还没有绑定 AI 页面，请先在项目中点击“绑定”",
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                        } else {
-                            openChatPopup(
-                                context = context,
-                                url = null,
-                            )
-                        }
+                        openChatPopup(
+                            context = context,
+                            url = null,
+                        )
                     },
                     modifier = Modifier.size(36.dp),
                 ) {
@@ -5882,6 +5873,8 @@ private const val YBROWSER_SELECT_CHAT_ACTION =
     "com.yagay.YBrowser.action.SELECT_CHATGPT_CHAT"
 private const val YBROWSER_OPEN_BROWSER_ACTION =
     "com.yagay.YBrowser.action.OPEN_YAGAYHUB_BROWSER"
+private const val YBROWSER_OPEN_AI_ACTION =
+    "com.yagay.YBrowser.action.OPEN_AI"
 private const val EXTRA_CHAT_BIND_REPO = "com.yagay.YBrowser.extra.BIND_REPO"
 private const val EXTRA_CHAT_BIND_PROJECT = "com.yagay.YBrowser.extra.BIND_PROJECT"
 private const val EXTRA_CHAT_BIND_URL = "com.yagay.YBrowser.extra.BIND_URL"
@@ -6223,7 +6216,31 @@ private fun openChatPopup(
     bindingProject: String? = null,
     bindingTitle: String? = null,
 ) {
-    val intent = Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
+    val aiIntent = Intent(YBROWSER_OPEN_AI_ACTION).apply {
+        setClassName(
+            YBROWSER_PACKAGE,
+            YBROWSER_AI_WORKSPACE_ACTIVITY,
+        )
+        url?.takeIf { it.isNotBlank() }?.let {
+            putExtra(YBROWSER_EXTRA_URL, it)
+        }
+        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
+        if (!bindingRepoKey.isNullOrBlank()) {
+            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
+            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
+            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
+        }
+    }
+
+    try {
+        context.startActivity(aiIntent)
+        return
+    } catch (_: ActivityNotFoundException) {
+        // Compatibility with older YBrowser versions that do not yet expose
+        // the isolated AI Workspace. Keep the previous compact browser path.
+    }
+
+    val legacyIntent = Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
         setClassName(
             YBROWSER_PACKAGE,
             YBROWSER_EMBEDDED_ACTIVITY,
@@ -6241,7 +6258,7 @@ private fun openChatPopup(
         }
     }
     try {
-        context.startActivity(intent)
+        context.startActivity(legacyIntent)
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(
             context,
@@ -6275,6 +6292,8 @@ private fun openUrl(
 private const val YBROWSER_PACKAGE = "com.yagay.YBrowser"
 private const val YBROWSER_EMBEDDED_ACTIVITY =
     "com.yagay.YBrowser.YagaYHubEmbeddedActivity"
+private const val YBROWSER_AI_WORKSPACE_ACTIVITY =
+    "com.yagay.ybrowser.ai.AiWorkspaceActivity"
 private const val YBROWSER_EXTRA_URL = "com.yagay.YBrowser.extra.URL"
 private const val YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE =
     "com.yagay.YBrowser.extra.YAGAYHUB_BINDING_MODE"

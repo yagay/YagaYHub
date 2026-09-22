@@ -1,3 +1,9 @@
+## 1.8.0
+
+- AI 顶部入口和项目已绑定 AI 页面优先调用 YBrowser 的独立 AI Workspace（`OPEN_AI`）。
+- 普通项目页、GitHub Actions、授权网页等继续调用普通 YBrowser，保持浏览器与 AI 工作区边界清晰。
+- AI Workspace 不可用时自动回退到旧版 YBrowser 紧凑浏览器入口，兼容尚未升级的 YBrowser。
+
 ## 1.7.0
 
 - 新增 GitHub 项目 ↔ ChatGPT 对话绑定：未绑定时从 YagaYHub 进入 YBrowser 选择具体 ChatGPT 聊天并回传 URL/标题；绑定后点击项目卡片的 ChatGPT 入口直接打开对应聊天。
