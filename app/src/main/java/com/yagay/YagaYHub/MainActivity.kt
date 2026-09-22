@@ -920,7 +920,7 @@ private fun HubScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                IconButton(
+                TextButton(
                     onClick = {
                         val bindings = loadAllChatBindings(context)
                         if (bindings.isEmpty()) {
@@ -937,10 +937,9 @@ private fun HubScreen(
                         }
                     },
                 ) {
-                    Icon(
-                        Icons.Outlined.AutoAwesome,
-                        contentDescription = "AI",
-                        modifier = Modifier.size(24.dp),
+                    Text(
+                        "AI",
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
                 TextButton(
