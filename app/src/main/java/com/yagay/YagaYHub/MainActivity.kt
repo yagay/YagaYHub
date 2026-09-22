@@ -409,6 +409,20 @@ private data class ArtifactDownloadRequest(
     }
 }
 
+private data class ActionsArtifact(
+    val id: Long,
+    val name: String,
+    val sizeBytes: Long,
+)
+
+private data class ArtifactSelection(
+    val appName: String,
+    val owner: String,
+    val repo: String,
+    val runId: Long,
+    val artifacts: List<ActionsArtifact>,
+)
+
 private data class ProjectSpec(
     val name: String,
     val packageName: String,
@@ -570,6 +584,7 @@ private fun HubScreen(
         mutableStateOf(downloadUiState?.let { !it.running } == true)
     }
     var pendingDownloadRequest by remember { mutableStateOf<ArtifactDownloadRequest?>(null) }
+    var artifactSelection by remember { mutableStateOf<ArtifactSelection?>(null) }
     var bindingListApp by remember { mutableStateOf<HubApp?>(null) }
     var bindingUiRevision by remember { mutableIntStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -606,6 +621,50 @@ private fun HubScreen(
         }
         pendingDownloadRequest = null
     }
+
+    val startSelectedArtifactDownload:
+        (ArtifactSelection, ActionsArtifact) -> Unit = { selection, artifact ->
+            val request = ArtifactDownloadRequest(
+                appName = selection.appName,
+                owner = selection.owner,
+                repo = selection.repo,
+                runId = selection.runId,
+                artifactId = artifact.id,
+                expectedSizeBytes = artifact.sizeBytes.takeIf { it > 0L },
+            )
+            if (downloadUiState?.running == true) {
+                Toast.makeText(
+                    context,
+                    "已有后台下载正在进行",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            } else if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                    PackageManager.PERMISSION_GRANTED
+            ) {
+                pendingDownloadRequest = request
+                notificationPermissionLauncher.launch(
+                    Manifest.permission.POST_NOTIFICATIONS
+                )
+                downloadUiState = DownloadUiState(
+                    appName = selection.appName,
+                    stage = "准备后台下载",
+                    totalBytes = artifact.sizeBytes.takeIf { it > 0L },
+                    running = true,
+                )
+                showDownloadPanel = true
+            } else {
+                startArtifactDownloadService(context, request)
+                downloadUiState = DownloadUiState(
+                    appName = selection.appName,
+                    stage = "准备后台下载",
+                    totalBytes = artifact.sizeBytes.takeIf { it > 0L },
+                    running = true,
+                )
+                showDownloadPanel = true
+            }
+        }
 
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
@@ -1016,7 +1075,6 @@ private fun HubScreen(
                     val onArtifactClick: () -> Unit = {
                         val repo = app.repo
                         val runId = app.latestRunId
-                        val artifactId = app.latestArtifactId
                         when {
                             repo == null -> {
                                 Toast.makeText(context, "未配置 GitHub 仓库", Toast.LENGTH_SHORT).show()
@@ -1024,47 +1082,57 @@ private fun HubScreen(
                             app.actionsStatus != ActionsStatus.SUCCESS -> {
                                 Toast.makeText(context, "最新一次 Actions 未成功，不抓取 ZIP", Toast.LENGTH_SHORT).show()
                             }
-                            runId == null || artifactId == null -> {
+                            runId == null -> {
                                 Toast.makeText(context, "最新成功构建没有可下载 ZIP，或产物已过期", Toast.LENGTH_SHORT).show()
                             }
                             githubToken.isBlank() -> {
                                 Toast.makeText(context, "请先在设置中保存 GitHub Token", Toast.LENGTH_SHORT).show()
                                 showSettings = true
                             }
+                            downloadUiState?.running == true -> {
+                                Toast.makeText(
+                                    context,
+                                    "已有后台下载正在进行",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
                             else -> {
-                                val request = ArtifactDownloadRequest(
-                                    appName = app.name,
-                                    owner = app.repoOwner,
-                                    repo = repo,
-                                    runId = runId,
-                                    artifactId = artifactId,
-                                    expectedSizeBytes = app.latestArtifactSizeBytes,
-                                )
-                                if (downloadUiState?.running == true) {
-                                    Toast.makeText(
-                                        context,
-                                        "已有后台下载正在进行",
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
-                                } else if (
-                                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                    context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-                                        PackageManager.PERMISSION_GRANTED
-                                ) {
-                                    pendingDownloadRequest = request
-                                    notificationPermissionLauncher.launch(
-                                        Manifest.permission.POST_NOTIFICATIONS
-                                    )
-                                } else {
-                                    startArtifactDownloadService(context, request)
+                                scope.launch {
+                                    val artifacts = withContext(Dispatchers.IO) {
+                                        fetchArtifactOptions(
+                                            owner = app.repoOwner,
+                                            repo = repo,
+                                            runId = runId,
+                                            token = githubToken,
+                                        )
+                                    }
+                                    when (artifacts.size) {
+                                        0 -> Toast.makeText(
+                                            context,
+                                            "最新成功构建没有可下载 ZIP，或产物已过期",
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                        1 -> startSelectedArtifactDownload(
+                                            ArtifactSelection(
+                                                appName = app.name,
+                                                owner = app.repoOwner,
+                                                repo = repo,
+                                                runId = runId,
+                                                artifacts = artifacts,
+                                            ),
+                                            artifacts.first(),
+                                        )
+                                        else -> {
+                                            artifactSelection = ArtifactSelection(
+                                                appName = app.name,
+                                                owner = app.repoOwner,
+                                                repo = repo,
+                                                runId = runId,
+                                                artifacts = artifacts,
+                                            )
+                                        }
+                                    }
                                 }
-                                downloadUiState = DownloadUiState(
-                                    appName = app.name,
-                                    stage = "准备后台下载",
-                                    totalBytes = app.latestArtifactSizeBytes,
-                                    running = true,
-                                )
-                                showDownloadPanel = true
                             }
                         }
                     }
@@ -1153,6 +1221,74 @@ private fun HubScreen(
         }
     }
 }
+
+    artifactSelection?.let { selection ->
+        AlertDialog(
+            onDismissRequest = { artifactSelection = null },
+            title = { Text("选择下载 ZIP · " + selection.appName) },
+            text = {
+                LazyColumn(
+                    modifier = Modifier.height(360.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    lazyItems(
+                        items = selection.artifacts,
+                        key = { it.id },
+                    ) { artifact ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    artifactSelection = null
+                                    startSelectedArtifactDownload(
+                                        selection,
+                                        artifact,
+                                    )
+                                },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(
+                                    horizontal = 12.dp,
+                                    vertical = 10.dp,
+                                ),
+                            ) {
+                                Text(
+                                    if (artifact.name.endsWith(
+                                            ".zip",
+                                            ignoreCase = true,
+                                        )
+                                    ) {
+                                        artifact.name
+                                    } else {
+                                        artifact.name + ".zip"
+                                    },
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (artifact.sizeBytes > 0L) {
+                                    Spacer(Modifier.height(3.dp))
+                                    Text(
+                                        formatFileSize(artifact.sizeBytes),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { artifactSelection = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
 
     bindingListApp?.let { app ->
         val repo = app.repo
@@ -3091,7 +3227,22 @@ private fun fetchLatestArtifactInfo(
     repo: String,
     runId: Long,
     token: String,
-): Pair<Long, Long>? {
+): Pair<Long, Long>? =
+    fetchArtifactOptions(
+        owner = owner,
+        repo = repo,
+        runId = runId,
+        token = token,
+    ).firstOrNull()?.let { artifact ->
+        artifact.id to artifact.sizeBytes
+    }
+
+private fun fetchArtifactOptions(
+    owner: String,
+    repo: String,
+    runId: Long,
+    token: String,
+): List<ActionsArtifact> {
     var connection: HttpURLConnection? = null
     return try {
         connection = githubGet(
@@ -3099,22 +3250,31 @@ private fun fetchLatestArtifactInfo(
                 "/actions/runs/" + runId + "/artifacts?per_page=100",
             token = token,
         )
-        if (connection.responseCode !in 200..299) return null
+        if (connection.responseCode !in 200..299) return emptyList()
 
         val body = connection.inputStream.bufferedReader().use { it.readText() }
-        val artifacts = JSONObject(body).optJSONArray("artifacts") ?: return null
+        val artifacts = JSONObject(body).optJSONArray("artifacts")
+            ?: return emptyList()
 
-        for (index in 0 until artifacts.length()) {
-            val artifact = artifacts.getJSONObject(index)
-            if (!artifact.optBoolean("expired", true)) {
+        buildList {
+            for (index in 0 until artifacts.length()) {
+                val artifact = artifacts.getJSONObject(index)
+                if (artifact.optBoolean("expired", true)) continue
                 val id = artifact.optLong("id")
-                val sizeBytes = artifact.optLong("size_in_bytes").coerceAtLeast(0L)
-                if (id > 0L) return id to sizeBytes
+                if (id <= 0L) continue
+                add(
+                    ActionsArtifact(
+                        id = id,
+                        name = artifact.optString("name")
+                            .ifBlank { "artifact-" + id },
+                        sizeBytes = artifact.optLong("size_in_bytes")
+                            .coerceAtLeast(0L),
+                    ),
+                )
             }
         }
-        null
     } catch (_: Exception) {
-        null
+        emptyList()
     } finally {
         connection?.disconnect()
     }
