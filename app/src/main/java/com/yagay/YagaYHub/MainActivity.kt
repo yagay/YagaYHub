@@ -4792,7 +4792,10 @@ private fun startChatGptBinding(
 ) {
     val repo = app.repo ?: return
     val intent = Intent(YBROWSER_SELECT_CHAT_ACTION).apply {
-        setPackage(YBROWSER_PACKAGE)
+        setClassName(
+            YBROWSER_PACKAGE,
+            YBROWSER_EMBEDDED_ACTIVITY,
+        )
         putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
         putExtra(
             EXTRA_CHAT_BIND_REPO,
@@ -4854,7 +4857,10 @@ private fun openChatPopup(
     bindingTitle: String? = null,
 ) {
     val intent = Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
-        setPackage(YBROWSER_PACKAGE)
+        setClassName(
+            YBROWSER_PACKAGE,
+            YBROWSER_EMBEDDED_ACTIVITY,
+        )
         putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
         putExtra(YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE, true)
         url?.takeIf { it.isNotBlank() }?.let {
@@ -4908,6 +4914,8 @@ private fun openUrl(
 }
 
 private const val YBROWSER_PACKAGE = "com.yagay.YBrowser"
+private const val YBROWSER_EMBEDDED_ACTIVITY =
+    "com.yagay.YBrowser.YagaYHubEmbeddedActivity"
 private const val YBROWSER_ACTION = "com.yagay.YBrowser.action.OPEN_URL"
 private const val YBROWSER_EXTRA_URL = "com.yagay.YBrowser.extra.URL"
 private const val YBROWSER_EXTRA_REUSE_EXISTING =
