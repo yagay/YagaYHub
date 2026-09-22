@@ -87,9 +87,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Sort
+import androidx.compose.material.icons.outlined.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -920,7 +924,7 @@ private fun HubScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                TextButton(
+                IconButton(
                     onClick = {
                         val bindings = loadAllChatBindings(context)
                         if (bindings.isEmpty()) {
@@ -936,27 +940,48 @@ private fun HubScreen(
                             )
                         }
                     },
+                    modifier = Modifier.size(36.dp),
                 ) {
-                    Text(
-                        "AI",
-                        fontWeight = FontWeight.SemiBold,
+                    Icon(
+                        Icons.Outlined.AutoAwesome,
+                        contentDescription = "AI",
+                        modifier = Modifier.size(20.dp),
                     )
                 }
-                TextButton(
+                IconButton(
                     onClick = {
                         downloadHistory = loadDownloadHistory(context)
                         showDownloadHistory = true
                     },
+                    modifier = Modifier.size(36.dp),
                 ) {
-                    Text("下载")
+                    Icon(
+                        Icons.Outlined.Download,
+                        contentDescription = "下载",
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
-                TextButton(onClick = { showSettings = true }) {
-                    Text("设置")
+                IconButton(
+                    onClick = { showSettings = true },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Settings,
+                        contentDescription = "设置",
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
-                TextButton(onClick = { showSortDialog = true }) {
-                    Text("排序")
+                IconButton(
+                    onClick = { showSortDialog = true },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Sort,
+                        contentDescription = "排序",
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
-                TextButton(
+                IconButton(
                     onClick = {
                         layoutMode = if (layoutMode == LayoutMode.LIST) {
                             LayoutMode.GRID
@@ -964,15 +989,33 @@ private fun HubScreen(
                             LayoutMode.LIST
                         }
                         saveLayoutMode(context, layoutMode)
-                    }
+                    },
+                    modifier = Modifier.size(36.dp),
                 ) {
-                    Text(if (layoutMode == LayoutMode.LIST) "网格" else "列表")
+                    Icon(
+                        if (layoutMode == LayoutMode.LIST) {
+                            Icons.Outlined.GridView
+                        } else {
+                            Icons.Outlined.ViewList
+                        },
+                        contentDescription = if (layoutMode == LayoutMode.LIST) {
+                            "切换到网格"
+                        } else {
+                            "切换到列表"
+                        },
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
                 IconButton(
                     onClick = requestRefresh,
                     enabled = !isRefreshing && !isAutoRefreshing,
+                    modifier = Modifier.size(36.dp),
                 ) {
-                    Icon(Icons.Outlined.Refresh, contentDescription = "刷新")
+                    Icon(
+                        Icons.Outlined.Refresh,
+                        contentDescription = "刷新",
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
             }
 
