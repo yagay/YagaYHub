@@ -5334,26 +5334,13 @@ private fun openChatPopup(
 private fun openUrl(
     context: Context,
     url: String,
-    reuseExisting: Boolean = false,
-    bindingRepoKey: String? = null,
-    bindingProject: String? = null,
-    bindingTitle: String? = null,
 ) {
-    val intent = Intent(YBROWSER_ACTION).apply {
+    val intent = Intent(YBROWSER_POPUP_ACTION).apply {
         setClassName(
             YBROWSER_PACKAGE,
-            YBROWSER_EMBEDDED_ACTIVITY,
+            YBROWSER_POPUP_ACTIVITY,
         )
         putExtra(YBROWSER_EXTRA_URL, url)
-        putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
-        if (reuseExisting) {
-            putExtra(YBROWSER_EXTRA_REUSE_EXISTING, true)
-        }
-        if (!bindingRepoKey.isNullOrBlank()) {
-            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
-            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
-            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
-        }
     }
     try {
         context.startActivity(intent)
@@ -5365,7 +5352,10 @@ private fun openUrl(
 private const val YBROWSER_PACKAGE = "com.yagay.YBrowser"
 private const val YBROWSER_EMBEDDED_ACTIVITY =
     "com.yagay.YBrowser.YagaYHubEmbeddedActivity"
+private const val YBROWSER_POPUP_ACTIVITY =
+    "com.yagay.YBrowser.PopupBrowserActivity"
 private const val YBROWSER_ACTION = "com.yagay.YBrowser.action.OPEN_URL"
+private const val YBROWSER_POPUP_ACTION = "com.yagay.YBrowser.action.OPEN_POPUP"
 private const val YBROWSER_EXTRA_URL = "com.yagay.YBrowser.extra.URL"
 private const val YBROWSER_EXTRA_REUSE_EXISTING =
     "com.yagay.YBrowser.extra.REUSE_EXISTING"
