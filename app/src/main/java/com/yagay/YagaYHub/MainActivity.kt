@@ -5335,12 +5335,15 @@ private fun openUrl(
     context: Context,
     url: String,
 ) {
-    val intent = Intent(YBROWSER_POPUP_ACTION).apply {
+    val intent = Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
         setClassName(
             YBROWSER_PACKAGE,
-            YBROWSER_POPUP_ACTIVITY,
+            YBROWSER_EMBEDDED_ACTIVITY,
         )
         putExtra(YBROWSER_EXTRA_URL, url)
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE, false)
+        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
     }
     try {
         context.startActivity(intent)
@@ -5352,13 +5355,7 @@ private fun openUrl(
 private const val YBROWSER_PACKAGE = "com.yagay.YBrowser"
 private const val YBROWSER_EMBEDDED_ACTIVITY =
     "com.yagay.YBrowser.YagaYHubEmbeddedActivity"
-private const val YBROWSER_POPUP_ACTIVITY =
-    "com.yagay.YBrowser.PopupBrowserActivity"
-private const val YBROWSER_ACTION = "com.yagay.YBrowser.action.OPEN_URL"
-private const val YBROWSER_POPUP_ACTION = "com.yagay.YBrowser.action.OPEN_POPUP"
 private const val YBROWSER_EXTRA_URL = "com.yagay.YBrowser.extra.URL"
-private const val YBROWSER_EXTRA_REUSE_EXISTING =
-    "com.yagay.YBrowser.extra.REUSE_EXISTING"
 private const val YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE =
     "com.yagay.YBrowser.extra.YAGAYHUB_BINDING_MODE"
 private const val YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE =
