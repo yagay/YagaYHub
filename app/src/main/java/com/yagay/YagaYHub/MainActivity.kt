@@ -35,6 +35,10 @@ import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.RandomAccessFile
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicLongArray
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -283,9 +287,8 @@ class ChatBindingCommandReceiver : BroadcastReceiver() {
 }
 
 class ArtifactDownloadService : Service() {
-    @Volatile
-    private var running = false
-    private var worker: Thread? = null
+    private val workers = ConcurrentHashMap<Long, Thread>()
+    private val serviceLock = Any()
 
     override fun onCreate() {
         super.onCreate()
@@ -294,84 +297,142 @@ class ArtifactDownloadService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (running || intent == null) return START_NOT_STICKY
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int,
+    ): Int {
+        val request = intent
+            ?.let(ArtifactDownloadRequest::fromIntent)
+            ?: return START_NOT_STICKY
 
-        val request = ArtifactDownloadRequest.fromIntent(intent) ?: return START_NOT_STICKY
-        running = true
+        synchronized(serviceLock) {
+            if (workers.containsKey(request.artifactId)) {
+                return START_NOT_STICKY
+            }
 
-        val initialState = DownloadUiState(
-            appName = request.appName,
-            stage = "准备后台下载",
-            totalBytes = request.expectedSizeBytes,
-            running = true,
-        )
-        saveDownloadUiState(this, initialState)
-        broadcastDownloadState(this, initialState)
-        startForeground(
-            DOWNLOAD_NOTIFICATION_ID,
-            buildDownloadNotification(this, initialState),
-        )
-
-        worker = Thread {
-            val token = loadGithubToken(this)
-            val destinationTreeUri = loadDownloadDirectoryUri(this)
-            val rootEnhanced = loadRootCleanupEnabled(this) && hasRootAccess()
-            var latestDownloaded = 0L
-            var latestTotal = request.expectedSizeBytes
-
-            val result = downloadArtifactZip(
-                context = this,
-                owner = request.owner,
-                repo = request.repo,
-                runId = request.runId,
-                artifactId = request.artifactId,
-                token = token,
-                destinationTreeUri = destinationTreeUri,
-                rootEnhancedCleanup = rootEnhanced,
-                expectedSizeBytes = request.expectedSizeBytes,
-                onProgress = { downloaded, total, stage ->
-                    latestDownloaded = downloaded
-                    latestTotal = total ?: latestTotal
-                    val state = DownloadUiState(
-                        appName = request.appName,
-                        stage = stage,
-                        downloadedBytes = downloaded,
-                        totalBytes = latestTotal,
-                        running = true,
-                    )
-                    broadcastDownloadState(this, state)
-                    updateDownloadNotification(this, state)
-                },
-            )
-
-            val finalState = DownloadUiState(
+            val initialState = DownloadUiState(
                 appName = request.appName,
-                stage = if (result.success) "下载完成" else "下载失败",
-                downloadedBytes = latestDownloaded,
-                totalBytes = latestTotal,
-                running = false,
-                message = result.message,
-                apks = result.extractedApks,
+                stage = "准备后台下载",
+                totalBytes = request.expectedSizeBytes,
+                running = true,
             )
-            saveDownloadUiState(this, finalState)
-            appendDownloadHistory(this, finalState)
-            broadcastDownloadState(this, finalState)
-            updateDownloadNotification(this, finalState)
-            running = false
-            stopForeground(STOP_FOREGROUND_DETACH)
-            stopSelf(startId)
-        }.apply {
-            name = "YagaYHub-ArtifactDownload"
-            start()
+            saveDownloadUiState(this, initialState)
+            broadcastDownloadState(this, initialState)
+
+            val worker = Thread {
+                runDownloadTask(request)
+            }.apply {
+                name = "YagaYHub-Artifact-" + request.artifactId
+            }
+            workers[request.artifactId] = worker
+
+            if (workers.size == 1) {
+                startForeground(
+                    DOWNLOAD_NOTIFICATION_ID,
+                    buildDownloadSummaryNotification(
+                        this,
+                        workers.size,
+                    ),
+                )
+            } else {
+                updateDownloadSummaryNotification(
+                    this,
+                    workers.size,
+                )
+            }
+            updateDownloadTaskNotification(
+                this,
+                request.artifactId,
+                initialState,
+            )
+            worker.start()
         }
 
         return START_NOT_STICKY
     }
 
+    private fun runDownloadTask(
+        request: ArtifactDownloadRequest,
+    ) {
+        val token = loadGithubToken(this)
+        val destinationTreeUri =
+            loadDownloadDirectoryUri(this)
+        val rootEnhanced =
+            loadRootCleanupEnabled(this) && hasRootAccess()
+        var latestDownloaded = 0L
+        var latestTotal = request.expectedSizeBytes
+
+        val result = downloadArtifactZip(
+            context = this,
+            owner = request.owner,
+            repo = request.repo,
+            runId = request.runId,
+            artifactId = request.artifactId,
+            artifactName = request.artifactName,
+            token = token,
+            destinationTreeUri = destinationTreeUri,
+            rootEnhancedCleanup = rootEnhanced,
+            expectedSizeBytes = request.expectedSizeBytes,
+            onProgress = { downloaded, total, stage ->
+                latestDownloaded = downloaded
+                latestTotal = total ?: latestTotal
+                val state = DownloadUiState(
+                    appName = request.appName,
+                    stage = stage,
+                    downloadedBytes = downloaded,
+                    totalBytes = latestTotal,
+                    running = true,
+                )
+                saveDownloadUiState(this, state)
+                broadcastDownloadState(this, state)
+                updateDownloadTaskNotification(
+                    this,
+                    request.artifactId,
+                    state,
+                )
+            },
+        )
+
+        val finalState = DownloadUiState(
+            appName = request.appName,
+            stage = if (result.success) {
+                "下载完成"
+            } else {
+                "下载失败 · 再次下载可断点重试"
+            },
+            downloadedBytes = latestDownloaded,
+            totalBytes = latestTotal,
+            running = false,
+            message = result.message,
+            apks = result.extractedApks,
+        )
+        saveDownloadUiState(this, finalState)
+        appendDownloadHistory(this, finalState)
+        broadcastDownloadState(this, finalState)
+        updateDownloadTaskNotification(
+            this,
+            request.artifactId,
+            finalState,
+        )
+
+        synchronized(serviceLock) {
+            workers.remove(request.artifactId)
+            if (workers.isEmpty()) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            } else {
+                updateDownloadSummaryNotification(
+                    this,
+                    workers.size,
+                )
+            }
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        worker = null
+        workers.clear()
     }
 }
 
@@ -381,6 +442,7 @@ private data class ArtifactDownloadRequest(
     val repo: String,
     val runId: Long,
     val artifactId: Long,
+    val artifactName: String,
     val expectedSizeBytes: Long?,
 ) {
     fun toIntent(context: Context): Intent =
@@ -390,23 +452,47 @@ private data class ArtifactDownloadRequest(
             putExtra(EXTRA_DOWNLOAD_REPO, repo)
             putExtra(EXTRA_DOWNLOAD_RUN_ID, runId)
             putExtra(EXTRA_DOWNLOAD_ARTIFACT_ID, artifactId)
-            expectedSizeBytes?.let { putExtra(EXTRA_DOWNLOAD_EXPECTED_SIZE, it) }
+            putExtra(EXTRA_DOWNLOAD_ARTIFACT_NAME, artifactName)
+            expectedSizeBytes?.let {
+                putExtra(EXTRA_DOWNLOAD_EXPECTED_SIZE, it)
+            }
         }
 
     companion object {
-        fun fromIntent(intent: Intent): ArtifactDownloadRequest? {
-            val appName = intent.getStringExtra(EXTRA_DOWNLOAD_APP_NAME) ?: return null
-            val owner = intent.getStringExtra(EXTRA_DOWNLOAD_OWNER) ?: return null
-            val repo = intent.getStringExtra(EXTRA_DOWNLOAD_REPO) ?: return null
-            val runId = intent.getLongExtra(EXTRA_DOWNLOAD_RUN_ID, -1L)
-            val artifactId = intent.getLongExtra(EXTRA_DOWNLOAD_ARTIFACT_ID, -1L)
-            if (runId <= 0L || artifactId <= 0L) return null
+        fun fromIntent(
+            intent: Intent,
+        ): ArtifactDownloadRequest? {
+            val appName = intent.getStringExtra(
+                EXTRA_DOWNLOAD_APP_NAME,
+            ) ?: return null
+            val owner = intent.getStringExtra(
+                EXTRA_DOWNLOAD_OWNER,
+            ) ?: return null
+            val repo = intent.getStringExtra(
+                EXTRA_DOWNLOAD_REPO,
+            ) ?: return null
+            val runId = intent.getLongExtra(
+                EXTRA_DOWNLOAD_RUN_ID,
+                -1L,
+            )
+            val artifactId = intent.getLongExtra(
+                EXTRA_DOWNLOAD_ARTIFACT_ID,
+                -1L,
+            )
+            if (runId <= 0L || artifactId <= 0L) {
+                return null
+            }
             return ArtifactDownloadRequest(
                 appName = appName,
                 owner = owner,
                 repo = repo,
                 runId = runId,
                 artifactId = artifactId,
+                artifactName = intent.getStringExtra(
+                    EXTRA_DOWNLOAD_ARTIFACT_NAME,
+                ).orEmpty().ifBlank {
+                    repo + "-" + artifactId
+                },
                 expectedSizeBytes = intent.getLongExtra(
                     EXTRA_DOWNLOAD_EXPECTED_SIZE,
                     -1L,
@@ -651,15 +737,10 @@ private fun HubScreen(
                 repo = selection.repo,
                 runId = selection.runId,
                 artifactId = artifact.id,
+                artifactName = artifact.name,
                 expectedSizeBytes = artifact.sizeBytes.takeIf { it > 0L },
             )
-            if (downloadUiState?.running == true) {
-                Toast.makeText(
-                    context,
-                    "已有后台下载正在进行",
-                    Toast.LENGTH_SHORT,
-                ).show()
-            } else if (
+            if (
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
                     PackageManager.PERMISSION_GRANTED
@@ -1197,13 +1278,6 @@ private fun HubScreen(
                             githubToken.isBlank() -> {
                                 Toast.makeText(context, "请先在设置中保存 GitHub Token", Toast.LENGTH_SHORT).show()
                                 showSettings = true
-                            }
-                            downloadUiState?.running == true -> {
-                                Toast.makeText(
-                                    context,
-                                    "已有后台下载正在进行",
-                                    Toast.LENGTH_SHORT,
-                                ).show()
                             }
                             else -> {
                                 scope.launch {
@@ -4999,6 +5073,7 @@ private const val EXTRA_DOWNLOAD_OWNER = "download_owner"
 private const val EXTRA_DOWNLOAD_REPO = "download_repo"
 private const val EXTRA_DOWNLOAD_RUN_ID = "download_run_id"
 private const val EXTRA_DOWNLOAD_ARTIFACT_ID = "download_artifact_id"
+private const val EXTRA_DOWNLOAD_ARTIFACT_NAME = "download_artifact_name"
 private const val EXTRA_DOWNLOAD_EXPECTED_SIZE = "download_expected_size"
 
 private const val EXTRA_STATE_APP_NAME = "state_app_name"
