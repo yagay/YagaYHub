@@ -349,6 +349,7 @@ class ArtifactDownloadService : Service() {
                 apks = result.extractedApks,
             )
             saveDownloadUiState(this, finalState)
+            appendDownloadHistory(this, finalState)
             broadcastDownloadState(this, finalState)
             updateDownloadNotification(this, finalState)
             running = false
@@ -515,7 +516,11 @@ private data class DownloadUiState(
     val apks: List<ExtractedApk> = emptyList(),
 )
 
-
+private data class DownloadHistoryEntry(
+    val id: Long,
+    val completedAt: Long,
+    val state: DownloadUiState,
+)
 
 private val knownProjects = listOf(
     ProjectSpec("YagaYHub", "com.yagay.YagaYHub", "YagaYHub", "YagaY 应用统一入口与项目管理"),
@@ -580,6 +585,11 @@ private fun HubScreen(
     var showSortDialog by remember { mutableStateOf(false) }
     var pendingInstallApk by remember { mutableStateOf<ExtractedApk?>(null) }
     var downloadUiState by remember { mutableStateOf(loadDownloadUiState(context)) }
+    var downloadHistory by remember { mutableStateOf(loadDownloadHistory(context)) }
+    var showDownloadHistory by remember { mutableStateOf(false) }
+    var selectedHistoryEntry by remember {
+        mutableStateOf<DownloadHistoryEntry?>(null)
+    }
     var showDownloadPanel by remember {
         mutableStateOf(downloadUiState?.let { !it.running } == true)
     }
@@ -673,6 +683,7 @@ private fun HubScreen(
                 val state = downloadUiStateFromIntent(intent) ?: return
                 downloadUiState = state
                 if (!state.running) {
+                    downloadHistory = loadDownloadHistory(context)
                     showDownloadPanel = true
                 }
             }
@@ -924,8 +935,13 @@ private fun HubScreen(
                         modifier = Modifier.size(24.dp),
                     )
                 }
-                if (downloadUiState != null) {
-                    TextButton(onClick = { showDownloadPanel = true }) {
+                if (downloadUiState != null || downloadHistory.isNotEmpty()) {
+                    TextButton(
+                        onClick = {
+                            downloadHistory = loadDownloadHistory(context)
+                            showDownloadHistory = true
+                        },
+                    ) {
                         Text("下载")
                     }
                 }
@@ -1507,6 +1523,50 @@ private fun HubScreen(
             dismissButton = {
                 TextButton(onClick = onQuickChatBindingDismiss) {
                     Text("取消")
+                }
+            },
+        )
+    }
+
+    if (showDownloadHistory) {
+        DownloadHistoryDialog(
+            history = downloadHistory,
+            activeState = downloadUiState?.takeIf { it.running },
+            onDismiss = { showDownloadHistory = false },
+            onOpenActive = {
+                showDownloadHistory = false
+                showDownloadPanel = true
+            },
+            onOpenHistory = { entry ->
+                showDownloadHistory = false
+                selectedHistoryEntry = entry
+            },
+            onClearHistory = {
+                clearDownloadHistory(context)
+                downloadHistory = emptyList()
+            },
+        )
+    }
+
+    selectedHistoryEntry?.let { entry ->
+        DownloadPanel(
+            state = entry.state,
+            onDismiss = { selectedHistoryEntry = null },
+            onInstall = { apk ->
+                selectedHistoryEntry = null
+                if (
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                    !context.packageManager.canRequestPackageInstalls()
+                ) {
+                    pendingInstallApk = apk
+                    unknownSourcesLauncher.launch(
+                        Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:" + context.packageName),
+                        )
+                    )
+                } else {
+                    openExtractedApk(context, apk)
                 }
             },
         )
@@ -2117,6 +2177,138 @@ private fun saveDownloadUiState(context: Context, state: DownloadUiState) {
         .apply()
 }
 
+private fun downloadStateToJson(state: DownloadUiState): JSONObject =
+    JSONObject().apply {
+        put("appName", state.appName)
+        put("stage", state.stage)
+        put("downloadedBytes", state.downloadedBytes)
+        put("totalBytes", state.totalBytes ?: JSONObject.NULL)
+        put("running", state.running)
+        put("message", state.message ?: JSONObject.NULL)
+        put(
+            "apks",
+            JSONArray().apply {
+                state.apks.forEach { apk ->
+                    put(
+                        JSONObject()
+                            .put("name", apk.name)
+                            .put("uri", apk.uri.toString())
+                    )
+                }
+            }
+        )
+    }
+
+private fun downloadStateFromJson(json: JSONObject): DownloadUiState {
+    val apkArray = json.optJSONArray("apks") ?: JSONArray()
+    val apks = buildList {
+        for (index in 0 until apkArray.length()) {
+            val item = apkArray.getJSONObject(index)
+            val name = item.optString("name")
+            val uri = item.optString("uri")
+            if (name.isNotBlank() && uri.isNotBlank()) {
+                add(ExtractedApk(name, Uri.parse(uri)))
+            }
+        }
+    }
+    return DownloadUiState(
+        appName = json.getString("appName"),
+        stage = json.optString("stage"),
+        downloadedBytes = json.optLong("downloadedBytes", 0L),
+        totalBytes = if (json.isNull("totalBytes")) null else json.optLong("totalBytes"),
+        running = json.optBoolean("running", false),
+        message = if (json.isNull("message")) null else json.optString("message"),
+        apks = apks,
+    )
+}
+
+private fun downloadHistoryKey(state: DownloadUiState): String {
+    val fileName = state.apks
+        .firstOrNull()
+        ?.name
+        ?.trim()
+        ?.lowercase()
+        .orEmpty()
+    return fileName.ifBlank { state.appName.trim().lowercase() }
+}
+
+private fun appendDownloadHistory(
+    context: Context,
+    state: DownloadUiState,
+) {
+    if (state.running) return
+
+    val now = System.currentTimeMillis()
+    val key = downloadHistoryKey(state)
+    val current = loadDownloadHistory(context)
+    val merged = buildList {
+        add(
+            DownloadHistoryEntry(
+                id = now,
+                completedAt = now,
+                state = state,
+            )
+        )
+        current
+            .filterNot { downloadHistoryKey(it.state) == key }
+            .take(DOWNLOAD_HISTORY_LIMIT - 1)
+            .forEach(::add)
+    }
+    saveDownloadHistory(context, merged)
+}
+
+private fun saveDownloadHistory(
+    context: Context,
+    history: List<DownloadHistoryEntry>,
+) {
+    val json = JSONArray().apply {
+        history.take(DOWNLOAD_HISTORY_LIMIT).forEach { entry ->
+            put(
+                JSONObject()
+                    .put("id", entry.id)
+                    .put("completedAt", entry.completedAt)
+                    .put("state", downloadStateToJson(entry.state))
+            )
+        }
+    }
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(DOWNLOAD_HISTORY_JSON, json.toString())
+        .apply()
+}
+
+private fun loadDownloadHistory(
+    context: Context,
+): List<DownloadHistoryEntry> {
+    val raw = context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .getString(DOWNLOAD_HISTORY_JSON, null)
+        ?: return emptyList()
+
+    return runCatching {
+        val array = JSONArray(raw)
+        buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val stateJson = item.optJSONObject("state") ?: continue
+                add(
+                    DownloadHistoryEntry(
+                        id = item.optLong("id", index.toLong()),
+                        completedAt = item.optLong("completedAt", 0L),
+                        state = downloadStateFromJson(stateJson),
+                    )
+                )
+            }
+        }.sortedByDescending { it.completedAt }
+    }.getOrDefault(emptyList())
+}
+
+private fun clearDownloadHistory(context: Context) {
+    context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .remove(DOWNLOAD_HISTORY_JSON)
+        .apply()
+}
+
 private fun clearDownloadUiState(context: Context) {
     context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
         .edit()
@@ -2129,28 +2321,125 @@ private fun loadDownloadUiState(context: Context): DownloadUiState? {
         .getString(DOWNLOAD_STATE_JSON, null)
         ?: return null
     return runCatching {
-        val json = JSONObject(raw)
-        val apkArray = json.optJSONArray("apks") ?: JSONArray()
-        val apks = buildList {
-            for (index in 0 until apkArray.length()) {
-                val item = apkArray.getJSONObject(index)
-                val name = item.optString("name")
-                val uri = item.optString("uri")
-                if (name.isNotBlank() && uri.isNotBlank()) {
-                    add(ExtractedApk(name, Uri.parse(uri)))
+        downloadStateFromJson(JSONObject(raw))
+    }.getOrNull()
+}
+
+@Composable
+private fun DownloadHistoryDialog(
+    history: List<DownloadHistoryEntry>,
+    activeState: DownloadUiState?,
+    onDismiss: () -> Unit,
+    onOpenActive: () -> Unit,
+    onOpenHistory: (DownloadHistoryEntry) -> Unit,
+    onClearHistory: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("下载历史") },
+        text = {
+            LazyColumn(
+                modifier = Modifier.height(420.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (activeState != null) {
+                    item("active-download") {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = onOpenActive),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(
+                                    horizontal = 12.dp,
+                                    vertical = 10.dp,
+                                ),
+                            ) {
+                                Text(
+                                    activeState.appName,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    "正在下载 · " + activeState.stage,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (history.isEmpty()) {
+                    item("empty-history") {
+                        Text(
+                            if (activeState == null) "暂无下载历史" else "暂无已完成下载",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    items(
+                        items = history,
+                        key = { it.id },
+                    ) { entry ->
+                        val state = entry.state
+                        val primaryName = state.apks.firstOrNull()?.name
+                            ?: state.appName
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenHistory(entry) },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(
+                                    horizontal = 12.dp,
+                                    vertical = 10.dp,
+                                ),
+                            ) {
+                                Text(
+                                    primaryName,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    state.appName + " · " +
+                                        android.text.format.DateFormat.format(
+                                            "MM-dd HH:mm",
+                                            entry.completedAt,
+                                        ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (state.totalBytes != null) {
+                                    Text(
+                                        formatFileSize(state.totalBytes),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
-        }
-        DownloadUiState(
-            appName = json.getString("appName"),
-            stage = json.optString("stage"),
-            downloadedBytes = json.optLong("downloadedBytes", 0L),
-            totalBytes = if (json.isNull("totalBytes")) null else json.optLong("totalBytes"),
-            running = json.optBoolean("running", false),
-            message = if (json.isNull("message")) null else json.optString("message"),
-            apks = apks,
-        )
-    }.getOrNull()
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+        dismissButton = {
+            if (history.isNotEmpty()) {
+                TextButton(onClick = onClearHistory) {
+                    Text("清空历史")
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -4583,6 +4872,8 @@ private const val LAYOUT_MODE = "layout_mode"
 private const val SORT_MODE = "sort_mode"
 private const val SORT_ASCENDING = "sort_ascending"
 private const val DOWNLOAD_STATE_JSON = "download_state_json"
+private const val DOWNLOAD_HISTORY_JSON = "download_history_json"
+private const val DOWNLOAD_HISTORY_LIMIT = 50
 private const val TOKEN_KEY_ALIAS = "YagaYHubGitHubToken"
 
 private fun getPackageInfoCompat(pm: PackageManager, packageName: String): PackageInfo? = runCatching {
