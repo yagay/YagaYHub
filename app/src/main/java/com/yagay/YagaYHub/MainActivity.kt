@@ -101,6 +101,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Sort
 import androidx.compose.material.icons.outlined.ViewList
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -688,7 +689,9 @@ private fun HubScreen(
     var showDownloadPanel by remember {
         mutableStateOf(downloadUiState?.let { !it.running } == true)
     }
-    var pendingDownloadRequest by remember { mutableStateOf<ArtifactDownloadRequest?>(null) }
+    var pendingDownloadRequests by remember {
+        mutableStateOf<List<ArtifactDownloadRequest>>(emptyList())
+    }
     var artifactSelection by remember { mutableStateOf<ArtifactSelection?>(null) }
     var bindingListApp by remember { mutableStateOf<HubApp?>(null) }
     var bindingUiRevision by remember { mutableIntStateOf(0) }
@@ -716,17 +719,18 @@ private fun HubScreen(
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        pendingDownloadRequest?.let { request ->
+        val pending = pendingDownloadRequests
+        pendingDownloadRequests = emptyList()
+        pending.forEach { request ->
             startArtifactDownloadService(context, request)
-            if (!granted) {
-                Toast.makeText(
-                    context,
-                    "通知权限未授予；后台下载仍会继续，但通知栏进度可能不可见",
-                    Toast.LENGTH_LONG,
-                ).show()
-            }
         }
-        pendingDownloadRequest = null
+        if (!granted && pending.isNotEmpty()) {
+            Toast.makeText(
+                context,
+                "通知权限未授予；后台下载仍会继续，但通知栏进度可能不可见",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
     }
 
     val startSelectedArtifactDownload:
@@ -745,10 +749,15 @@ private fun HubScreen(
                 context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
                     PackageManager.PERMISSION_GRANTED
             ) {
-                pendingDownloadRequest = request
-                notificationPermissionLauncher.launch(
-                    Manifest.permission.POST_NOTIFICATIONS
-                )
+                val shouldRequestPermission =
+                    pendingDownloadRequests.isEmpty()
+                pendingDownloadRequests =
+                    pendingDownloadRequests + request
+                if (shouldRequestPermission) {
+                    notificationPermissionLauncher.launch(
+                        Manifest.permission.POST_NOTIFICATIONS
+                    )
+                }
                 downloadUiState = DownloadUiState(
                     appName = selection.appName,
                     stage = "准备后台下载",
@@ -1410,68 +1419,169 @@ private fun HubScreen(
 }
 
     artifactSelection?.let { selection ->
+        var selectedArtifactIds by remember(selection) {
+            mutableStateOf<Set<Long>>(emptySet())
+        }
         AlertDialog(
             onDismissRequest = { artifactSelection = null },
-            title = { Text("选择下载 ZIP · " + selection.appName) },
+            title = {
+                Text(
+                    "选择下载 ZIP · " + selection.appName,
+                )
+            },
             text = {
                 LazyColumn(
                     modifier = Modifier.height(360.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement =
+                        Arrangement.spacedBy(6.dp),
                 ) {
                     lazyItems(
                         items = selection.artifacts,
                         key = { it.id },
                     ) { artifact ->
+                        val checked =
+                            artifact.id in selectedArtifactIds
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    artifactSelection = null
-                                    startSelectedArtifactDownload(
-                                        selection,
-                                        artifact,
-                                    )
+                                    selectedArtifactIds =
+                                        if (checked) {
+                                            selectedArtifactIds -
+                                                artifact.id
+                                        } else {
+                                            selectedArtifactIds +
+                                                artifact.id
+                                        }
                                 },
                             shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            color =
+                                MaterialTheme.colorScheme
+                                    .surfaceContainer,
                         ) {
-                            Column(
+                            Row(
                                 modifier = Modifier.padding(
-                                    horizontal = 12.dp,
-                                    vertical = 10.dp,
+                                    horizontal = 10.dp,
+                                    vertical = 8.dp,
                                 ),
+                                verticalAlignment =
+                                    Alignment.CenterVertically,
                             ) {
-                                Text(
-                                    if (artifact.name.endsWith(
-                                            ".zip",
-                                            ignoreCase = true,
-                                        )
-                                    ) {
-                                        artifact.name
-                                    } else {
-                                        artifact.name + ".zip"
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = {
+                                        selectedArtifactIds =
+                                            if (checked) {
+                                                selectedArtifactIds -
+                                                    artifact.id
+                                            } else {
+                                                selectedArtifactIds +
+                                                    artifact.id
+                                            }
                                     },
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
                                 )
-                                if (artifact.sizeBytes > 0L) {
-                                    Spacer(Modifier.height(3.dp))
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                ) {
                                     Text(
-                                        formatFileSize(artifact.sizeBytes),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        if (
+                                            artifact.name.endsWith(
+                                                ".zip",
+                                                ignoreCase = true,
+                                            )
+                                        ) {
+                                            artifact.name
+                                        } else {
+                                            artifact.name + ".zip"
+                                        },
+                                        fontWeight =
+                                            FontWeight.SemiBold,
+                                        maxLines = 2,
+                                        overflow =
+                                            TextOverflow.Ellipsis,
                                     )
+                                    if (artifact.sizeBytes > 0L) {
+                                        Spacer(
+                                            Modifier.height(3.dp),
+                                        )
+                                        Text(
+                                            formatFileSize(
+                                                artifact.sizeBytes,
+                                            ),
+                                            style =
+                                                MaterialTheme.typography
+                                                    .bodySmall,
+                                            color =
+                                                MaterialTheme.colorScheme
+                                                    .onSurfaceVariant,
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
             },
-            confirmButton = {},
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val selected =
+                            selection.artifacts.filter {
+                                it.id in selectedArtifactIds
+                            }
+                        artifactSelection = null
+                        selected.forEach { artifact ->
+                            startSelectedArtifactDownload(
+                                selection,
+                                artifact,
+                            )
+                        }
+                    },
+                    enabled =
+                        selectedArtifactIds.isNotEmpty(),
+                ) {
+                    Text(
+                        "下载 " +
+                            selectedArtifactIds.size +
+                            " 个",
+                    )
+                }
+            },
             dismissButton = {
-                TextButton(onClick = { artifactSelection = null }) {
-                    Text("取消")
+                Row {
+                    TextButton(
+                        onClick = {
+                            selectedArtifactIds =
+                                if (
+                                    selectedArtifactIds.size ==
+                                    selection.artifacts.size
+                                ) {
+                                    emptySet()
+                                } else {
+                                    selection.artifacts
+                                        .map { it.id }
+                                        .toSet()
+                                }
+                        },
+                    ) {
+                        Text(
+                            if (
+                                selectedArtifactIds.size ==
+                                selection.artifacts.size
+                            ) {
+                                "全不选"
+                            } else {
+                                "全选"
+                            },
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            artifactSelection = null
+                        },
+                    ) {
+                        Text("取消")
+                    }
                 }
             },
         )
