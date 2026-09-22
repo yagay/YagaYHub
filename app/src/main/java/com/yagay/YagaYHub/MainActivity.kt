@@ -79,9 +79,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items as lazyItems
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -602,6 +604,8 @@ private fun HubScreen(
     var artifactSelection by remember { mutableStateOf<ArtifactSelection?>(null) }
     var bindingListApp by remember { mutableStateOf<HubApp?>(null) }
     var bindingUiRevision by remember { mutableIntStateOf(0) }
+    val appListState = rememberLazyListState()
+    val appGridState = rememberLazyGridState()
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val directoryPicker = rememberLauncherForActivityResult(
@@ -756,6 +760,13 @@ private fun HubScreen(
 
     val requestRefresh: () -> Unit = {
         if (!isRefreshing && !isAutoRefreshing) {
+            scope.launch {
+                if (layoutMode == LayoutMode.LIST) {
+                    appListState.scrollToItem(0)
+                } else {
+                    appGridState.scrollToItem(0)
+                }
+            }
             isRefreshing = true
             refreshKey++
         }
@@ -1259,6 +1270,7 @@ private fun HubScreen(
 
                 if (layoutMode == LayoutMode.LIST) {
                     LazyColumn(
+                        state = appListState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -1275,6 +1287,7 @@ private fun HubScreen(
                         val columns = if (maxWidth < 430.dp) 4 else 5
                         LazyVerticalGrid(
                             columns = GridCells.Fixed(columns),
+                            state = appGridState,
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(top = 4.dp, bottom = 24.dp),
                             horizontalArrangement = Arrangement.SpaceEvenly,
