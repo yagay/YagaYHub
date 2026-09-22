@@ -2695,6 +2695,28 @@ private fun AppListEntry(
     onBindClick: () -> Unit,
 ) {
     val hasNewerActions = hasNewerActionsBuild(app)
+    val installLabel = when {
+        app.repoOnly -> "GitHub"
+        !app.installed -> "未安装"
+        app.launchIntent == null -> "模块"
+        else -> "已安装"
+    }
+    val installColor = when {
+        !app.installed && !app.repoOnly -> MaterialTheme.colorScheme.error
+        app.repoOnly -> MaterialTheme.colorScheme.secondary
+        app.launchIntent == null -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.primary
+    }
+    val actionsColor = when (app.actionsStatus) {
+        ActionsStatus.SUCCESS -> MaterialTheme.colorScheme.primary
+        ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
+        ActionsStatus.RUNNING -> MaterialTheme.colorScheme.tertiary
+        ActionsStatus.QUEUED -> MaterialTheme.colorScheme.secondary
+        ActionsStatus.CANCELLED -> MaterialTheme.colorScheme.outline
+        ActionsStatus.LOADING,
+        ActionsStatus.NONE,
+        ActionsStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
     Surface(
         modifier = Modifier
@@ -2703,166 +2725,184 @@ private fun AppListEntry(
                 onClick = onClick,
                 onLongClick = onLongClick,
             ),
-        shape = RoundedCornerShape(14.dp),
-        tonalElevation = 1.dp,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 0.dp,
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(horizontal = 12.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Box(
-                modifier = Modifier.clickable(onClick = onIconClick),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
             ) {
-                AppIcon(app)
                 Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .size(13.dp)
-                        .clip(CircleShape)
-                        .background(
-                            when {
-                                app.repoOnly -> MaterialTheme.colorScheme.secondary
-                                !app.installed -> MaterialTheme.colorScheme.outline
-                                app.launchIntent == null -> MaterialTheme.colorScheme.tertiary
-                                else -> MaterialTheme.colorScheme.primary
-                            }
-                        )
-                )
-            }
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    app.name,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    when {
-                        app.repoOnly -> "GitHub 项目"
-                        !app.installed -> "未安装"
-                        app.launchIntent == null && app.versionName.isNullOrBlank() -> "模块"
-                        app.versionName.isNullOrBlank() -> "已安装"
-                        app.launchIntent == null -> "模块 · " + app.versionName
-                        else -> "版本 " + app.versionName
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (!app.installed && !app.repoOnly) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    fontWeight = if (!app.installed && !app.repoOnly) {
-                        FontWeight.SemiBold
-                    } else {
-                        FontWeight.Normal
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                app.installedUpdateTime?.let { updateTime ->
-                    Text(
-                        "本机更新  " + updateTime,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
+                    modifier = Modifier.clickable(onClick = onIconClick),
+                ) {
+                    AppIcon(app)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(13.dp)
+                            .clip(CircleShape)
+                            .background(installColor),
                     )
                 }
-                app.latestActionTime?.let { actionTime ->
-                    Text(
-                        "Actions   " + actionTime,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable(onClick = onActionsClick)
-                            .padding(horizontal = 2.dp, vertical = 1.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = when {
-                            !app.installed && !app.repoOnly ->
-                                MaterialTheme.colorScheme.error
-                            hasNewerActions ->
-                                Color(0xFFFFC107)
-                            else ->
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        fontWeight = if (
-                            (!app.installed && !app.repoOnly) || hasNewerActions
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            app.name,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .padding(horizontal = 7.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            FontWeight.SemiBold
-                        } else {
-                            FontWeight.Normal
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(installColor),
+                            )
+                            Text(
+                                installLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+
+                    Text(
+                        buildString {
+                            when {
+                                app.repoOnly -> append("GitHub 项目")
+                                app.versionName.isNullOrBlank() -> append(
+                                    if (app.installed) "已安装" else "等待安装"
+                                )
+                                else -> append("v").append(app.versionName)
+                            }
+                            app.installedUpdateTime?.let {
+                                append(" · ").append(it)
+                            }
                         },
-                        maxLines = 2,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
+
+                    if (app.repo != null) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(7.dp))
+                                .clickable(onClick = onActionsClick)
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(actionsColor),
+                            )
+                            Text(
+                                buildString {
+                                    append("Actions ")
+                                    append(app.actionsStatus.label)
+                                    app.latestActionTime?.let {
+                                        append(" · ").append(it)
+                                    }
+                                    if (hasNewerActions) {
+                                        append(" · 有新构建")
+                                    }
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (
+                                    app.actionsStatus == ActionsStatus.FAILURE
+                                ) {
+                                    MaterialTheme.colorScheme.error
+                                } else if (hasNewerActions) {
+                                    MaterialTheme.colorScheme.tertiary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                fontWeight = if (hasNewerActions) {
+                                    FontWeight.SemiBold
+                                } else {
+                                    FontWeight.Normal
+                                },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
 
             if (app.repo != null) {
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(MaterialTheme.colorScheme.surface)
                             .clickable(onClick = onLatestActionClick)
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Icon(
                             Icons.Outlined.PlayArrow,
-                            contentDescription = "GitHub Actions",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    when (app.actionsStatus) {
-                                        ActionsStatus.SUCCESS -> MaterialTheme.colorScheme.primary
-                                        ActionsStatus.FAILURE -> MaterialTheme.colorScheme.error
-                                        ActionsStatus.RUNNING -> MaterialTheme.colorScheme.tertiary
-                                        ActionsStatus.QUEUED -> MaterialTheme.colorScheme.secondary
-                                        ActionsStatus.CANCELLED -> MaterialTheme.colorScheme.outline
-                                        ActionsStatus.LOADING,
-                                        ActionsStatus.NONE,
-                                        ActionsStatus.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                )
+                            contentDescription = "打开最近一次 Actions",
+                            modifier = Modifier.size(15.dp),
+                            tint = actionsColor,
                         )
                         Text(
-                            app.actionsStatus.label,
+                            "Actions",
                             style = MaterialTheme.typography.labelMedium,
-                            color = if (app.actionsStatus == ActionsStatus.FAILURE) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            fontWeight = FontWeight.Medium,
                             maxLines = 1,
                         )
                     }
 
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(MaterialTheme.colorScheme.surface)
                             .clickable(onClick = onArtifactClick)
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Icon(
                             Icons.Outlined.Download,
-                            contentDescription = "下载最新成功构建 ZIP",
-                            modifier = Modifier.size(17.dp),
+                            contentDescription = "下载最新成功构建",
+                            modifier = Modifier.size(15.dp),
                             tint = if (app.latestArtifactId != null) {
                                 MaterialTheme.colorScheme.primary
                             } else {
@@ -2879,13 +2919,39 @@ private fun AppListEntry(
 
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(onClick = onChatClick)
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .clickable(
+                                onClick = if (chatBindingCount > 0) {
+                                    onChatClick
+                                } else {
+                                    onBindClick
+                                },
+                            )
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
+                        Icon(
+                            Icons.Outlined.AutoAwesome,
+                            contentDescription = if (chatBindingCount > 0) {
+                                "AI 绑定"
+                            } else {
+                                "添加 AI 绑定"
+                            },
+                            modifier = Modifier.size(15.dp),
+                            tint = if (chatBinding != null) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.secondary
+                            },
+                        )
                         Text(
-                            "AI " + chatBindingCount,
+                            if (chatBindingCount > 0) {
+                                "AI " + chatBindingCount
+                            } else {
+                                "AI +"
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             color = if (chatBinding != null) {
                                 MaterialTheme.colorScheme.primary
@@ -2895,24 +2961,8 @@ private fun AppListEntry(
                             fontWeight = if (chatBinding != null) {
                                 FontWeight.SemiBold
                             } else {
-                                FontWeight.Normal
+                                FontWeight.Medium
                             },
-                            maxLines = 1,
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(onClick = onBindClick)
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "绑定",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.secondary,
-                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                         )
                     }
