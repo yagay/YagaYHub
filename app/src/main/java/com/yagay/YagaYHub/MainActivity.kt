@@ -2224,7 +2224,8 @@ private fun downloadStateFromJson(json: JSONObject): DownloadUiState {
 
 private fun downloadHistoryKey(state: DownloadUiState): String {
     val fileName = state.apks
-        .firstOrNull()
+        .takeIf { it.isNotEmpty() }
+        ?.let(::choosePrimaryApk)
         ?.name
         ?.trim()
         ?.lowercase()
@@ -2379,7 +2380,7 @@ private fun DownloadHistoryDialog(
                         )
                     }
                 } else {
-                    items(
+                    lazyItems(
                         items = history,
                         key = { it.id },
                     ) { entry ->
