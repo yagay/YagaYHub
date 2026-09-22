@@ -1122,6 +1122,21 @@ private fun HubScreen(
                             else -> Unit
                         }
                     }
+                    val onIconClick: () -> Unit = {
+                        when {
+                            app.launchIntent != null -> openApp(context, app)
+                            app.installed -> Toast.makeText(
+                                context,
+                                "该应用没有可启动入口",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            else -> Toast.makeText(
+                                context,
+                                "该应用尚未安装",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    }
                     val onLongClick: () -> Unit = {
                         when {
                             app.installed -> openAppDetails(context, app.packageName)
@@ -1243,6 +1258,7 @@ private fun HubScreen(
                         AppListEntry(
                             app = app,
                             onClick = onClick,
+                            onIconClick = onIconClick,
                             onLongClick = onLongClick,
                             onActionsClick = onActionsClick,
                             onLatestActionClick = onLatestActionClick,
@@ -1256,6 +1272,7 @@ private fun HubScreen(
                         AppEntry(
                             app = app,
                             onClick = onClick,
+                            onIconClick = onIconClick,
                             onLongClick = onLongClick,
                             onActionsClick = onActionsClick,
                             onLatestActionClick = onLatestActionClick,
@@ -2667,6 +2684,7 @@ private fun GithubDeviceAuthDialog(
 private fun AppListEntry(
     app: HubApp,
     onClick: () -> Unit,
+    onIconClick: () -> Unit,
     onLongClick: () -> Unit,
     onActionsClick: () -> Unit,
     onLatestActionClick: () -> Unit,
@@ -2695,7 +2713,9 @@ private fun AppListEntry(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Box {
+            Box(
+                modifier = Modifier.clickable(onClick = onIconClick),
+            ) {
                 AppIcon(app)
                 Box(
                     modifier = Modifier
@@ -2907,6 +2927,7 @@ private fun AppListEntry(
 private fun AppEntry(
     app: HubApp,
     onClick: () -> Unit,
+    onIconClick: () -> Unit,
     onLongClick: () -> Unit,
     onActionsClick: () -> Unit,
     onLatestActionClick: () -> Unit,
@@ -2928,7 +2949,9 @@ private fun AppEntry(
             .padding(horizontal = 2.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box {
+        Box(
+            modifier = Modifier.clickable(onClick = onIconClick),
+        ) {
             AppIcon(app)
             Box(
                 modifier = Modifier
