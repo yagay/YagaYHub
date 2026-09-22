@@ -558,6 +558,7 @@ private fun HubScreen(
     var filter by remember { mutableStateOf(AppFilter.INSTALLED) }
     var refreshKey by remember { mutableStateOf(0) }
     var isRefreshing by remember { mutableStateOf(false) }
+    var initialLoadCompleted by remember { mutableStateOf(false) }
     var isAutoRefreshing by remember { mutableStateOf(false) }
     var autoRefreshCursor by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
@@ -741,6 +742,7 @@ private fun HubScreen(
     }
 
     LaunchedEffect(refreshKey, githubToken) {
+        val isInitialLoad = !initialLoadCompleted
         try {
             val loadedApps = loadHubApps(context)
             val mergedApps = withContext(Dispatchers.IO) {
@@ -753,7 +755,15 @@ private fun HubScreen(
             apps = withContext(Dispatchers.IO) {
                 loadActionsStatuses(mergedApps, githubToken)
             }
+            if (isInitialLoad) {
+                if (layoutMode == LayoutMode.LIST) {
+                    appListState.scrollToItem(0)
+                } else {
+                    appGridState.scrollToItem(0)
+                }
+            }
         } finally {
+            initialLoadCompleted = true
             isRefreshing = false
         }
     }
