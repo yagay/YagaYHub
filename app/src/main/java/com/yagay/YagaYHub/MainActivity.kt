@@ -4841,12 +4841,8 @@ private fun syncChatBindingToYBrowser(
         putExtra(EXTRA_CHAT_BIND_PROJECT, project)
         putExtra(EXTRA_CHAT_BIND_URL, url)
         putExtra(EXTRA_CHAT_BIND_TITLE, title)
-        addFlags(
-            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                Intent.FLAG_ACTIVITY_SINGLE_TOP
-        )
     }
-    runCatching { context.startActivity(intent) }
+    runCatching { context.sendBroadcast(intent) }
 }
 
 private fun openChatPopup(
@@ -4893,7 +4889,10 @@ private fun openUrl(
     bindingTitle: String? = null,
 ) {
     val intent = Intent(YBROWSER_ACTION).apply {
-        setPackage(YBROWSER_PACKAGE)
+        setClassName(
+            YBROWSER_PACKAGE,
+            YBROWSER_EMBEDDED_ACTIVITY,
+        )
         putExtra(YBROWSER_EXTRA_URL, url)
         putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
         if (reuseExisting) {
@@ -4904,12 +4903,11 @@ private fun openUrl(
             putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
             putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
         }
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     try {
         context.startActivity(intent)
     } catch (_: ActivityNotFoundException) {
-        Toast.makeText(context, "请先安装 YBrowser", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "请先安装或更新 YBrowser", Toast.LENGTH_SHORT).show()
     }
 }
 
