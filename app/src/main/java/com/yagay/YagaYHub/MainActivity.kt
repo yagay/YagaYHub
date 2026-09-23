@@ -6268,10 +6268,7 @@ private fun returnChatBindingToRequester(
 ) {
     val intent =
         Intent(YBROWSER_OPEN_AI_ACTION).apply {
-            setClassName(
-                YBROWSER_PACKAGE,
-                YBROWSER_AI_WORKSPACE_ACTIVITY,
-            )
+            setPackage(YBROWSER_PACKAGE)
             putExtra(
                 YBROWSER_EXTRA_URL,
                 url,
@@ -6326,10 +6323,7 @@ private fun openChatPopup(
 ) {
     val workspaceIntent =
         Intent(YBROWSER_OPEN_AI_ACTION).apply {
-            setClassName(
-                YBROWSER_PACKAGE,
-                YBROWSER_AI_WORKSPACE_ACTIVITY,
-            )
+            setPackage(YBROWSER_PACKAGE)
 
             url?.takeIf {
                 it.isNotBlank()
@@ -6416,8 +6410,6 @@ private const val EXTRA_AI_WINDOW_ID =
 private const val YBROWSER_PACKAGE = "com.yagay.YBrowser"
 private const val YBROWSER_OPEN_AI_ACTION =
     "com.yagay.YBrowser.action.OPEN_AI"
-private const val YBROWSER_AI_WORKSPACE_ACTIVITY =
-    "com.yagay.ybrowser.ai.AiWorkspaceActivity"
 private const val YBROWSER_EMBEDDED_ACTIVITY =
     "com.yagay.YBrowser.YagaYHubEmbeddedActivity"
 private const val YBROWSER_EXTRA_URL = "com.yagay.YBrowser.extra.URL"
