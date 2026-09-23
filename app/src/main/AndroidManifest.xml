@@ -27,7 +27,6 @@
         <package android:name="com.yagay.floatlens" />
         <package android:name="com.yagay.ListCleaner" />
         <package android:name="com.yagay.MiniWindowGuard" />
-        <package android:name="com.yagay.aihub" />
         <package android:name="com.rk.taskmanager" />
         <package android:name="com.yagay.dualsignal" />
         <package android:name="com.yagay.chromex" />
