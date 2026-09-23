@@ -186,6 +186,14 @@ class MainActivity : ComponentActivity() {
                                     url = request.url,
                                     title = request.title,
                                 )
+                                returnChatBindingToRequester(
+                                    context = this,
+                                    request = request,
+                                    repoKey = repoKey,
+                                    project = app.name,
+                                    url = request.url,
+                                    title = request.title,
+                                )
                             }
                         },
                     )
@@ -243,6 +251,12 @@ class MainActivity : ComponentActivity() {
                     quickChatBindingRequest = QuickChatBindingRequest(
                         url = url,
                         title = title,
+                        windowId = intent
+                            .getStringExtra(EXTRA_AI_WINDOW_ID)
+                            ?.takeIf { it.isNotBlank() },
+                        requesterPackage = intent
+                            .getStringExtra(EXTRA_BIND_REQUESTER_PACKAGE)
+                            ?.takeIf { it.isNotBlank() },
                     )
                 }
             }
@@ -597,6 +611,8 @@ private data class ChatBinding(
 private data class QuickChatBindingRequest(
     val url: String,
     val title: String,
+    val windowId: String? = null,
+    val requesterPackage: String? = null,
 )
 
 private data class DownloadUiState(
@@ -6209,6 +6225,35 @@ private fun syncChatBindingToYBrowser(
     runCatching { context.sendBroadcast(intent) }
 }
 
+private fun returnChatBindingToRequester(
+    context: Context,
+    request: QuickChatBindingRequest,
+    repoKey: String,
+    project: String,
+    url: String,
+    title: String,
+) {
+    if (request.requesterPackage != AIHUB_PACKAGE) return
+
+    val intent = Intent(AIHUB_BINDING_SYNC_ACTION).apply {
+        setClassName(
+            AIHUB_PACKAGE,
+            AIHUB_MAIN_ACTIVITY,
+        )
+        putExtra(EXTRA_AI_WINDOW_ID, request.windowId.orEmpty())
+        putExtra(EXTRA_CHAT_BIND_REPO, repoKey)
+        putExtra(EXTRA_CHAT_BIND_PROJECT, project)
+        putExtra(EXTRA_CHAT_BIND_URL, url)
+        putExtra(EXTRA_CHAT_BIND_TITLE, title)
+        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
+        addFlags(
+            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        )
+    }
+    runCatching { context.startActivity(intent) }
+}
+
 private fun openChatPopup(
     context: Context,
     url: String?,
@@ -6216,7 +6261,35 @@ private fun openChatPopup(
     bindingProject: String? = null,
     bindingTitle: String? = null,
 ) {
-    val aiIntent = Intent(YBROWSER_OPEN_AI_ACTION).apply {
+    val aiHubIntent = Intent(AIHUB_OPEN_AI_ACTION).apply {
+        setClassName(
+            AIHUB_PACKAGE,
+            AIHUB_MAIN_ACTIVITY,
+        )
+        url?.takeIf { it.isNotBlank() }?.let {
+            putExtra(YBROWSER_EXTRA_URL, it)
+            putExtra(EXTRA_CHAT_BIND_URL, it)
+        }
+        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
+        if (!bindingRepoKey.isNullOrBlank()) {
+            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
+            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
+            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
+        }
+        addFlags(
+            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        )
+    }
+
+    try {
+        context.startActivity(aiHubIntent)
+        return
+    } catch (_: ActivityNotFoundException) {
+        // Compatibility fallback while AIHub is not installed/upgraded yet.
+    }
+
+    val legacyAiIntent = Intent(YBROWSER_OPEN_AI_ACTION).apply {
         setClassName(
             YBROWSER_PACKAGE,
             YBROWSER_AI_WORKSPACE_ACTIVITY,
@@ -6233,11 +6306,11 @@ private fun openChatPopup(
     }
 
     try {
-        context.startActivity(aiIntent)
+        context.startActivity(legacyAiIntent)
         return
     } catch (_: ActivityNotFoundException) {
         // Compatibility with older YBrowser versions that do not yet expose
-        // the isolated AI Workspace. Keep the previous compact browser path.
+        // the isolated AI Workspace. Keep the compact browser path.
     }
 
     val legacyIntent = Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
@@ -6262,7 +6335,7 @@ private fun openChatPopup(
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(
             context,
-            "请先安装或更新 YBrowser",
+            "请先安装或更新 AIHub / YBrowser",
             Toast.LENGTH_SHORT,
         ).show()
     }
@@ -6288,6 +6361,18 @@ private fun openUrl(
         Toast.makeText(context, "请先安装或更新 YBrowser", Toast.LENGTH_SHORT).show()
     }
 }
+
+private const val AIHUB_PACKAGE = "com.yagay.aihub"
+private const val AIHUB_MAIN_ACTIVITY =
+    "com.yagay.aihub.MainActivity"
+private const val AIHUB_OPEN_AI_ACTION =
+    "com.yagay.AIHub.action.OPEN_AI"
+private const val AIHUB_BINDING_SYNC_ACTION =
+    "com.yagay.AIHub.action.CHATGPT_BINDING_SYNC"
+private const val EXTRA_BIND_REQUESTER_PACKAGE =
+    "com.yagay.YBrowser.extra.BIND_REQUESTER_PACKAGE"
+private const val EXTRA_AI_WINDOW_ID =
+    "com.yagay.YBrowser.extra.AI_WINDOW_ID"
 
 private const val YBROWSER_PACKAGE = "com.yagay.YBrowser"
 private const val YBROWSER_EMBEDDED_ACTIVITY =
