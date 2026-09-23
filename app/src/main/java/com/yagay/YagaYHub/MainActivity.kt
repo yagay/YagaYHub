@@ -6233,13 +6233,25 @@ private fun returnChatBindingToRequester(
     url: String,
     title: String,
 ) {
-    if (request.requesterPackage != AIHUB_PACKAGE) return
+    val requester = request.requesterPackage ?: return
 
-    val intent = Intent(AIHUB_BINDING_SYNC_ACTION).apply {
-        setClassName(
-            AIHUB_PACKAGE,
-            AIHUB_MAIN_ACTIVITY,
-        )
+    val intent = when (requester) {
+        YBROWSER_PACKAGE ->
+            Intent(YBROWSER_OPEN_AI_ACTION).apply {
+                setClassName(
+                    YBROWSER_PACKAGE,
+                    YBROWSER_AI_WORKSPACE_ACTIVITY,
+                )
+            }
+        AIHUB_PACKAGE ->
+            Intent(AIHUB_BINDING_SYNC_ACTION).apply {
+                setClassName(
+                    AIHUB_PACKAGE,
+                    AIHUB_MAIN_ACTIVITY,
+                )
+            }
+        else -> return
+    }.apply {
         putExtra(EXTRA_AI_WINDOW_ID, request.windowId.orEmpty())
         putExtra(EXTRA_CHAT_BIND_REPO, repoKey)
         putExtra(EXTRA_CHAT_BIND_PROJECT, project)
@@ -6251,6 +6263,7 @@ private fun returnChatBindingToRequester(
                 Intent.FLAG_ACTIVITY_SINGLE_TOP
         )
     }
+
     runCatching { context.startActivity(intent) }
 }
 
@@ -6261,6 +6274,34 @@ private fun openChatPopup(
     bindingProject: String? = null,
     bindingTitle: String? = null,
 ) {
+    val workspaceIntent = Intent(YBROWSER_OPEN_AI_ACTION).apply {
+        setClassName(
+            YBROWSER_PACKAGE,
+            YBROWSER_AI_WORKSPACE_ACTIVITY,
+        )
+        url?.takeIf { it.isNotBlank() }?.let {
+            putExtra(YBROWSER_EXTRA_URL, it)
+            putExtra(EXTRA_CHAT_BIND_URL, it)
+        }
+        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
+        if (!bindingRepoKey.isNullOrBlank()) {
+            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
+            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
+            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
+        }
+        addFlags(
+            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        )
+    }
+
+    try {
+        context.startActivity(workspaceIntent)
+        return
+    } catch (_: ActivityNotFoundException) {
+        // Compatibility fallback for devices that have not upgraded YBrowser.
+    }
+
     val aiHubIntent = Intent(AIHUB_OPEN_AI_ACTION).apply {
         setClassName(
             AIHUB_PACKAGE,
@@ -6289,30 +6330,6 @@ private fun openChatPopup(
         // Compatibility fallback while AIHub is not installed/upgraded yet.
     }
 
-    val legacyAiIntent = Intent(YBROWSER_OPEN_AI_ACTION).apply {
-        setClassName(
-            YBROWSER_PACKAGE,
-            YBROWSER_AI_WORKSPACE_ACTIVITY,
-        )
-        url?.takeIf { it.isNotBlank() }?.let {
-            putExtra(YBROWSER_EXTRA_URL, it)
-        }
-        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
-        if (!bindingRepoKey.isNullOrBlank()) {
-            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
-            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
-            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
-        }
-    }
-
-    try {
-        context.startActivity(legacyAiIntent)
-        return
-    } catch (_: ActivityNotFoundException) {
-        // Compatibility with older YBrowser versions that do not yet expose
-        // the isolated AI Workspace. Keep the compact browser path.
-    }
-
     val legacyIntent = Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
         setClassName(
             YBROWSER_PACKAGE,
@@ -6335,7 +6352,7 @@ private fun openChatPopup(
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(
             context,
-            "请先安装或更新 AIHub / YBrowser",
+            "请先安装或更新 YBrowser",
             Toast.LENGTH_SHORT,
         ).show()
     }
