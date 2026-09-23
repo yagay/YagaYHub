@@ -268,9 +268,25 @@ class ChatBindingCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         when (intent?.action) {
             ACTION_REMOVE_CHATGPT_BINDING -> {
-                val url = intent.getStringExtra(EXTRA_CHAT_BIND_URL).orEmpty()
-                if (url.isBlank()) return
-                removeChatBinding(context, url)
+                val repo = intent.getStringExtra(
+                    EXTRA_CHAT_BIND_REPO
+                ).orEmpty()
+                val url = intent.getStringExtra(
+                    EXTRA_CHAT_BIND_URL
+                ).orEmpty()
+
+                if (repo.isNotBlank()) {
+                    removeChatBindingsByRepo(
+                        context = context,
+                        repoKey = repo,
+                    )
+                } else {
+                    if (url.isBlank()) return
+                    removeChatBinding(
+                        context,
+                        url,
+                    )
+                }
             }
             ACTION_CHATGPT_BOUND -> {
                 val repo = intent.getStringExtra(EXTRA_CHAT_BIND_REPO).orEmpty()
@@ -6130,6 +6146,26 @@ private fun removeChatBinding(
         context,
         loadAllChatBindings(context)
             .filterNot { sameChatBindingUrl(it.url, normalizedUrl) },
+    )
+}
+
+private fun removeChatBindingsByRepo(
+    context: Context,
+    repoKey: String,
+) {
+    val normalizedRepo =
+        normalizedRepoKey(repoKey)
+    if (normalizedRepo.isBlank()) return
+
+    saveAllChatBindings(
+        context,
+        loadAllChatBindings(context)
+            .filterNot {
+                it.repoKey.equals(
+                    normalizedRepo,
+                    ignoreCase = true,
+                )
+            },
     )
 }
 
