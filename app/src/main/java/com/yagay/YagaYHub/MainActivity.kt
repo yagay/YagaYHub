@@ -652,7 +652,6 @@ private val knownProjects = listOf(
     ProjectSpec("FloatLens", "com.yagay.floatlens", "FloatLens", "悬浮识别、截图与屏幕工具"),
     ProjectSpec("List Cleaner", "com.yagay.ListCleaner", "ListCleaner", "分享面板、组件与列表清理"),
     ProjectSpec("MiniWindowGuard", "com.yagay.MiniWindowGuard", "MiniWindowGuard", "后台播放与小窗增强"),
-    ProjectSpec("AIHub", "com.yagay.aihub", "AIHub", "多 AI 统一入口"),
     ProjectSpec("TaskManagerX", "com.rk.taskmanager", "TaskManagerX", "Root / LSPosed 任务管理工具"),
     ProjectSpec("Dual Signal", "com.yagay.dualsignal", "dualsingal", "双排信号状态栏模块"),
     ProjectSpec("ChromeX", "com.yagay.chromex", "ChromeX", "Chrome / Chromium 增强模块"),
@@ -5905,8 +5904,6 @@ private const val YBROWSER_SELECT_CHAT_ACTION =
     "com.yagay.YBrowser.action.SELECT_CHATGPT_CHAT"
 private const val YBROWSER_OPEN_BROWSER_ACTION =
     "com.yagay.YBrowser.action.OPEN_YAGAYHUB_BROWSER"
-private const val YBROWSER_OPEN_AI_ACTION =
-    "com.yagay.YBrowser.action.OPEN_AI"
 private const val EXTRA_CHAT_BIND_REPO = "com.yagay.YBrowser.extra.BIND_REPO"
 private const val EXTRA_CHAT_BIND_PROJECT = "com.yagay.YBrowser.extra.BIND_PROJECT"
 private const val EXTRA_CHAT_BIND_URL = "com.yagay.YBrowser.extra.BIND_URL"
@@ -6269,38 +6266,70 @@ private fun returnChatBindingToRequester(
     url: String,
     title: String,
 ) {
-    val requester = request.requesterPackage ?: return
-
-    val intent = when (requester) {
-        YBROWSER_PACKAGE ->
-            Intent(YBROWSER_OPEN_AI_ACTION).apply {
-                setClassName(
-                    YBROWSER_PACKAGE,
-                    YBROWSER_AI_WORKSPACE_ACTIVITY,
-                )
-            }
-        AIHUB_PACKAGE ->
-            Intent(AIHUB_BINDING_SYNC_ACTION).apply {
-                setClassName(
-                    AIHUB_PACKAGE,
-                    AIHUB_MAIN_ACTIVITY,
-                )
-            }
-        else -> return
-    }.apply {
-        putExtra(EXTRA_AI_WINDOW_ID, request.windowId.orEmpty())
-        putExtra(EXTRA_CHAT_BIND_REPO, repoKey)
-        putExtra(EXTRA_CHAT_BIND_PROJECT, project)
-        putExtra(EXTRA_CHAT_BIND_URL, url)
-        putExtra(EXTRA_CHAT_BIND_TITLE, title)
-        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
-        addFlags(
-            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                Intent.FLAG_ACTIVITY_SINGLE_TOP
-        )
+    if (
+        request.requesterPackage != null &&
+        request.requesterPackage != YBROWSER_PACKAGE
+    ) {
+        return
     }
 
-    runCatching { context.startActivity(intent) }
+    val intent =
+        Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
+            setClassName(
+                YBROWSER_PACKAGE,
+                YBROWSER_EMBEDDED_ACTIVITY,
+            )
+            putExtra(
+                YBROWSER_EXTRA_URL,
+                url,
+            )
+            putExtra(
+                YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE,
+                true,
+            )
+            putExtra(
+                YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE,
+                false,
+            )
+            putExtra(
+                EXTRA_AI_WINDOW_ID,
+                request.windowId.orEmpty(),
+            )
+            putExtra(
+                EXTRA_CHAT_BIND_REPO,
+                repoKey,
+            )
+            putExtra(
+                EXTRA_CHAT_BIND_PROJECT,
+                project,
+            )
+            putExtra(
+                EXTRA_CHAT_BIND_URL,
+                url,
+            )
+            putExtra(
+                EXTRA_CHAT_BIND_TITLE,
+                title,
+            )
+            putExtra(
+                EXTRA_CHAT_TARGETS_JSON,
+                chatTargetsJson(context),
+            )
+            addFlags(
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            )
+        }
+
+    runCatching {
+        context.startActivity(intent)
+    }.onFailure {
+        Toast.makeText(
+            context,
+            "请先安装或更新 YBrowser",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
 }
 
 private fun openChatPopup(
@@ -6310,81 +6339,60 @@ private fun openChatPopup(
     bindingProject: String? = null,
     bindingTitle: String? = null,
 ) {
-    val workspaceIntent = Intent(YBROWSER_OPEN_AI_ACTION).apply {
-        setClassName(
-            YBROWSER_PACKAGE,
-            YBROWSER_AI_WORKSPACE_ACTIVITY,
-        )
-        url?.takeIf { it.isNotBlank() }?.let {
-            putExtra(YBROWSER_EXTRA_URL, it)
-            putExtra(EXTRA_CHAT_BIND_URL, it)
+    val browserIntent =
+        Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
+            setClassName(
+                YBROWSER_PACKAGE,
+                YBROWSER_EMBEDDED_ACTIVITY,
+            )
+            putExtra(
+                YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE,
+                true,
+            )
+            putExtra(
+                YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE,
+                false,
+            )
+            url?.takeIf {
+                it.isNotBlank()
+            }?.let {
+                putExtra(
+                    YBROWSER_EXTRA_URL,
+                    it,
+                )
+                putExtra(
+                    EXTRA_CHAT_BIND_URL,
+                    it,
+                )
+            }
+            putExtra(
+                EXTRA_CHAT_TARGETS_JSON,
+                chatTargetsJson(context),
+            )
+            if (
+                !bindingRepoKey.isNullOrBlank()
+            ) {
+                putExtra(
+                    EXTRA_CHAT_BIND_REPO,
+                    bindingRepoKey,
+                )
+                putExtra(
+                    EXTRA_CHAT_BIND_PROJECT,
+                    bindingProject.orEmpty(),
+                )
+                putExtra(
+                    EXTRA_CHAT_BIND_TITLE,
+                    bindingTitle.orEmpty(),
+                )
+            }
+            addFlags(
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            )
         }
-        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
-        if (!bindingRepoKey.isNullOrBlank()) {
-            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
-            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
-            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
-        }
-        addFlags(
-            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                Intent.FLAG_ACTIVITY_SINGLE_TOP
-        )
-    }
 
     try {
-        context.startActivity(workspaceIntent)
-        return
-    } catch (_: ActivityNotFoundException) {
-        // Compatibility fallback for devices that have not upgraded YBrowser.
-    }
-
-    val aiHubIntent = Intent(AIHUB_OPEN_AI_ACTION).apply {
-        setClassName(
-            AIHUB_PACKAGE,
-            AIHUB_MAIN_ACTIVITY,
-        )
-        url?.takeIf { it.isNotBlank() }?.let {
-            putExtra(YBROWSER_EXTRA_URL, it)
-            putExtra(EXTRA_CHAT_BIND_URL, it)
-        }
-        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
-        if (!bindingRepoKey.isNullOrBlank()) {
-            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
-            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
-            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
-        }
-        addFlags(
-            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                Intent.FLAG_ACTIVITY_SINGLE_TOP
-        )
-    }
-
-    try {
-        context.startActivity(aiHubIntent)
-        return
-    } catch (_: ActivityNotFoundException) {
-        // Compatibility fallback while AIHub is not installed/upgraded yet.
-    }
-
-    val legacyIntent = Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
-        setClassName(
-            YBROWSER_PACKAGE,
-            YBROWSER_EMBEDDED_ACTIVITY,
-        )
-        putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
-        putExtra(YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE, true)
-        url?.takeIf { it.isNotBlank() }?.let {
-            putExtra(YBROWSER_EXTRA_URL, it)
-        }
-        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
-        if (!bindingRepoKey.isNullOrBlank()) {
-            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
-            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
-            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
-        }
-    }
-    try {
-        context.startActivity(legacyIntent)
+        context.startActivity(browserIntent)
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(
             context,
@@ -6415,13 +6423,6 @@ private fun openUrl(
     }
 }
 
-private const val AIHUB_PACKAGE = "com.yagay.aihub"
-private const val AIHUB_MAIN_ACTIVITY =
-    "com.yagay.aihub.MainActivity"
-private const val AIHUB_OPEN_AI_ACTION =
-    "com.yagay.AIHub.action.OPEN_AI"
-private const val AIHUB_BINDING_SYNC_ACTION =
-    "com.yagay.AIHub.action.CHATGPT_BINDING_SYNC"
 private const val EXTRA_BIND_REQUESTER_PACKAGE =
     "com.yagay.YBrowser.extra.BIND_REQUESTER_PACKAGE"
 private const val EXTRA_AI_WINDOW_ID =
@@ -6430,8 +6431,6 @@ private const val EXTRA_AI_WINDOW_ID =
 private const val YBROWSER_PACKAGE = "com.yagay.YBrowser"
 private const val YBROWSER_EMBEDDED_ACTIVITY =
     "com.yagay.YBrowser.YagaYHubEmbeddedActivity"
-private const val YBROWSER_AI_WORKSPACE_ACTIVITY =
-    "com.yagay.ybrowser.ai.AiWorkspaceActivity"
 private const val YBROWSER_EXTRA_URL = "com.yagay.YBrowser.extra.URL"
 private const val YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE =
     "com.yagay.YBrowser.extra.YAGAYHUB_BINDING_MODE"
