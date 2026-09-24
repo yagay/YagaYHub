@@ -6292,6 +6292,10 @@ private fun returnChatBindingToRequester(
                 false,
             )
             putExtra(
+                YBROWSER_EXTRA_YAGAYHUB_EMBEDDED,
+                true,
+            )
+            putExtra(
                 EXTRA_AI_WINDOW_ID,
                 request.windowId.orEmpty(),
             )
@@ -6363,6 +6367,11 @@ private fun openChatPopup(
             chatTargetsJson(context),
         )
 
+        putExtra(
+            YBROWSER_EXTRA_YAGAYHUB_EMBEDDED,
+            true,
+        )
+
         if (!bindingRepoKey.isNullOrBlank()) {
             putExtra(
                 EXTRA_CHAT_BIND_REPO,
@@ -6407,6 +6416,7 @@ private fun openUrl(
         putExtra(YBROWSER_EXTRA_URL, url)
         putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
         putExtra(YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE, false)
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_EMBEDDED, true)
         putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
     }
     try {
@@ -6433,6 +6443,8 @@ private const val YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE =
     "com.yagay.YBrowser.extra.YAGAYHUB_BINDING_MODE"
 private const val YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE =
     "com.yagay.YBrowser.extra.YAGAYHUB_COMPACT_MODE"
+private const val YBROWSER_EXTRA_YAGAYHUB_EMBEDDED =
+    "com.yagay.YBrowser.extra.YAGAYHUB_EMBEDDED"
 
 @Composable
 private fun YagaYHubTheme(content: @Composable () -> Unit) {
