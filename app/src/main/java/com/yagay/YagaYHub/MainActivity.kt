@@ -4148,6 +4148,7 @@ private data class DownloadResult(
     val success: Boolean,
     val message: String,
     val extractedApks: List<ExtractedApk> = emptyList(),
+    val outputUri: Uri? = null,
 )
 
 private data class TempArtifactDownload(
@@ -4939,6 +4940,7 @@ private fun downloadArtifactZip(
                 }
             },
             extractedApks = extractedApks,
+            outputUri = destination.uri,
         )
     } catch (error: Exception) {
         outputUri?.let { uri ->
