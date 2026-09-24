@@ -317,8 +317,58 @@ class ChatBindingCommandReceiver : BroadcastReceiver() {
     }
 }
 
+private class DownloadCancelledException :
+    RuntimeException("download-cancelled")
+
+private class DownloadControl {
+    private val monitor = Object()
+
+    @Volatile
+    var paused: Boolean = false
+        private set
+
+    @Volatile
+    var cancelled: Boolean = false
+        private set
+
+    fun pause() {
+        paused = true
+    }
+
+    fun resume() {
+        synchronized(monitor) {
+            paused = false
+            monitor.notifyAll()
+        }
+    }
+
+    fun cancel() {
+        synchronized(monitor) {
+            cancelled = true
+            paused = false
+            monitor.notifyAll()
+        }
+    }
+
+    fun checkpoint() {
+        synchronized(monitor) {
+            while (paused && !cancelled) {
+                monitor.wait(500L)
+            }
+            if (cancelled) {
+                throw DownloadCancelledException()
+            }
+        }
+    }
+}
+
 class ArtifactDownloadService : Service() {
-    private val workers = ConcurrentHashMap<Long, Thread>()
+    private val workers =
+        ConcurrentHashMap<Long, Thread>()
+    private val controls =
+        ConcurrentHashMap<Long, DownloadControl>()
+    private val taskStates =
+        ConcurrentHashMap<Long, DownloadUiState>()
     private val serviceLock = Any()
 
     override fun onCreate() {
@@ -333,26 +383,79 @@ class ArtifactDownloadService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
-        val request = intent
-            ?.let(ArtifactDownloadRequest::fromIntent)
-            ?: return START_NOT_STICKY
+        val request =
+            intent?.let(
+                ArtifactDownloadRequest::fromIntent
+            ) ?: return START_NOT_STICKY
 
-        synchronized(serviceLock) {
-            if (workers.containsKey(request.artifactId)) {
+        when (intent.action) {
+            ACTION_DOWNLOAD_PAUSE -> {
+                pauseDownload(request)
                 return START_NOT_STICKY
             }
 
+            ACTION_DOWNLOAD_RESUME -> {
+                resumeDownload(request)
+                return START_NOT_STICKY
+            }
+
+            ACTION_DOWNLOAD_CANCEL -> {
+                cancelDownload(request)
+                return START_NOT_STICKY
+            }
+        }
+
+        startDownload(request)
+        return START_NOT_STICKY
+    }
+
+    private fun startDownload(
+        request: ArtifactDownloadRequest,
+    ) {
+        synchronized(serviceLock) {
+            if (
+                workers.containsKey(
+                    request.artifactId
+                )
+            ) {
+                return
+            }
+
+            val control = DownloadControl()
+            controls[request.artifactId] =
+                control
+
             val initialState =
-                request.toDownloadUiState()
-            saveDownloadUiState(this, initialState)
-            broadcastDownloadState(this, initialState)
+                request.toDownloadUiState(
+                    stage =
+                        if (
+                            hasArtifactResumeData(
+                                this,
+                                request,
+                            )
+                        ) {
+                            "准备断点续传"
+                        } else {
+                            "准备后台下载"
+                        },
+                )
+            publishState(
+                request,
+                initialState,
+            )
 
             val worker = Thread {
-                runDownloadTask(request)
+                runDownloadTask(
+                    request,
+                    control,
+                )
             }.apply {
-                name = "YagaYHub-Artifact-" + request.artifactId
+                name =
+                    "YagaYHub-Artifact-" +
+                        request.artifactId
             }
-            workers[request.artifactId] = worker
+            workers[request.artifactId] =
+                worker
 
             if (workers.size == 1) {
                 startForeground(
@@ -368,89 +471,249 @@ class ArtifactDownloadService : Service() {
                     workers.size,
                 )
             }
-            updateDownloadTaskNotification(
-                this,
-                request.artifactId,
-                initialState,
-            )
             worker.start()
         }
+    }
 
-        return START_NOT_STICKY
+    private fun pauseDownload(
+        request: ArtifactDownloadRequest,
+    ) {
+        val control =
+            controls[request.artifactId]
+                ?: return
+        control.pause()
+
+        val state =
+            taskStates[request.artifactId]
+                ?: request.toDownloadUiState()
+        publishState(
+            request,
+            state.copy(
+                stage = "已暂停 · 断点已保留",
+                running = true,
+                paused = true,
+                cancelled = false,
+            ),
+        )
+    }
+
+    private fun resumeDownload(
+        request: ArtifactDownloadRequest,
+    ) {
+        val control =
+            controls[request.artifactId]
+        if (control != null) {
+            control.resume()
+            val state =
+                taskStates[request.artifactId]
+                    ?: request.toDownloadUiState()
+            publishState(
+                request,
+                state.copy(
+                    stage = "继续下载…",
+                    running = true,
+                    paused = false,
+                    cancelled = false,
+                ),
+            )
+            return
+        }
+
+        // The process/service may have been recreated while paused.
+        // Starting the same request is safe because the range metadata and
+        // partial file are keyed by artifact id.
+        startDownload(request)
+    }
+
+    private fun cancelDownload(
+        request: ArtifactDownloadRequest,
+    ) {
+        val control =
+            controls[request.artifactId]
+        if (control != null) {
+            control.cancel()
+            val state =
+                taskStates[request.artifactId]
+                    ?: request.toDownloadUiState()
+            publishState(
+                request,
+                state.copy(
+                    stage = "正在取消…",
+                    running = true,
+                    paused = false,
+                    cancelled = true,
+                ),
+            )
+            return
+        }
+
+        deleteArtifactResumeData(
+            this,
+            request,
+        )
+        val cancelledState =
+            request.toDownloadUiState(
+                stage = "已取消",
+                running = false,
+                cancelled = true,
+                message =
+                    "下载已取消，未完成断点已清理",
+            )
+        publishState(
+            request,
+            cancelledState,
+        )
+    }
+
+    private fun publishState(
+        request: ArtifactDownloadRequest,
+        state: DownloadUiState,
+    ) {
+        taskStates[request.artifactId] =
+            state
+        saveDownloadUiState(this, state)
+        if (state.running) {
+            saveActiveDownloadState(
+                this,
+                state,
+            )
+        } else {
+            removeActiveDownloadState(
+                this,
+                request.artifactId,
+            )
+        }
+        broadcastDownloadState(
+            this,
+            state,
+        )
+        updateDownloadTaskNotification(
+            this,
+            request.artifactId,
+            state,
+        )
     }
 
     private fun runDownloadTask(
         request: ArtifactDownloadRequest,
+        control: DownloadControl,
     ) {
         val token = loadGithubToken(this)
         val destinationTreeUri =
             loadDownloadDirectoryUri(this)
         val rootEnhanced =
-            loadRootCleanupEnabled(this) && hasRootAccess()
+            loadRootCleanupEnabled(this) &&
+                hasRootAccess()
         var latestDownloaded = 0L
-        var latestTotal = request.expectedSizeBytes
+        var latestTotal =
+            request.expectedSizeBytes
 
-        val result = downloadArtifactZip(
-            context = this,
-            owner = request.owner,
-            repo = request.repo,
-            runId = request.runId,
-            artifactId = request.artifactId,
-            artifactName = request.artifactName,
-            token = token,
-            destinationTreeUri = destinationTreeUri,
-            rootEnhancedCleanup = rootEnhanced,
-            expectedSizeBytes = request.expectedSizeBytes,
-            onProgress = { downloaded, total, stage ->
-                latestDownloaded = downloaded
-                latestTotal = total ?: latestTotal
-                val state =
-                    request.toDownloadUiState(
-                        stage = stage,
-                        downloadedBytes = downloaded,
-                        totalBytes = latestTotal,
-                        running = true,
+        val result =
+            downloadArtifactZip(
+                context = this,
+                owner = request.owner,
+                repo = request.repo,
+                runId = request.runId,
+                artifactId = request.artifactId,
+                artifactName =
+                    request.artifactName,
+                token = token,
+                destinationTreeUri =
+                    destinationTreeUri,
+                rootEnhancedCleanup =
+                    rootEnhanced,
+                expectedSizeBytes =
+                    request.expectedSizeBytes,
+                control = control,
+                onProgress = {
+                        downloaded,
+                        total,
+                        stage,
+                    ->
+                    latestDownloaded =
+                        downloaded
+                    latestTotal =
+                        total ?: latestTotal
+                    publishState(
+                        request,
+                        request.toDownloadUiState(
+                            stage = stage,
+                            downloadedBytes =
+                                downloaded,
+                            totalBytes =
+                                latestTotal,
+                            running = true,
+                            paused =
+                                control.paused,
+                            cancelled =
+                                control.cancelled,
+                        ),
                     )
-                saveDownloadUiState(this, state)
-                broadcastDownloadState(this, state)
-                updateDownloadTaskNotification(
-                    this,
-                    request.artifactId,
-                    state,
-                )
-            },
-        )
+                },
+            )
+
+        val cancelled =
+            control.cancelled ||
+                result.cancelled
+        if (cancelled) {
+            deleteArtifactResumeData(
+                this,
+                request,
+            )
+        }
 
         val finalState =
             request.toDownloadUiState(
                 stage =
-                    if (result.success) {
-                        "下载完成"
-                    } else {
-                        "下载失败 · 再次下载可断点重试"
+                    when {
+                        cancelled ->
+                            "已取消"
+                        result.success ->
+                            "下载完成"
+                        else ->
+                            "下载失败 · 再次下载可断点重试"
                     },
-                downloadedBytes = latestDownloaded,
-                totalBytes = latestTotal,
+                downloadedBytes =
+                    latestDownloaded,
+                totalBytes =
+                    latestTotal,
                 running = false,
+                paused = false,
+                cancelled = cancelled,
                 message = result.message,
-                apks = result.extractedApks,
+                apks =
+                    result.extractedApks,
                 fileUri =
                     result.outputUri
                         ?.toString(),
             )
-        saveDownloadUiState(this, finalState)
-        appendDownloadHistory(this, finalState)
-        broadcastDownloadState(this, finalState)
-        updateDownloadTaskNotification(
-            this,
-            request.artifactId,
+
+        publishState(
+            request,
             finalState,
         )
+        if (result.success) {
+            appendDownloadHistory(
+                this,
+                finalState,
+            )
+        }
 
         synchronized(serviceLock) {
-            workers.remove(request.artifactId)
+            workers.remove(
+                request.artifactId
+            )
+            controls.remove(
+                request.artifactId
+            )
+            taskStates.remove(
+                request.artifactId
+            )
+
             if (workers.isEmpty()) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopForeground(
+                    STOP_FOREGROUND_REMOVE
+                )
                 stopSelf()
             } else {
                 updateDownloadSummaryNotification(
@@ -462,8 +725,13 @@ class ArtifactDownloadService : Service() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        controls.values.forEach {
+            it.cancel()
+        }
+        controls.clear()
         workers.clear()
+        taskStates.clear()
+        super.onDestroy()
     }
 }
 
