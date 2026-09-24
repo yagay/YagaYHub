@@ -7673,6 +7673,10 @@ private fun startChatGptBinding(
                 ?.takeIf { it.isNotBlank() }
                 ?: CHATGPT_NEW_CHAT_URL,
         )
+        putExtra(
+            YBROWSER_EXTRA_FRESH_BINDING,
+            currentBinding == null,
+        )
     }
     try {
         context.startActivity(intent)
@@ -7903,6 +7907,8 @@ private const val YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE =
     "com.yagay.YBrowser.extra.YAGAYHUB_COMPACT_MODE"
 private const val YBROWSER_EXTRA_YAGAYHUB_EMBEDDED =
     "com.yagay.YBrowser.extra.YAGAYHUB_EMBEDDED"
+private const val YBROWSER_EXTRA_FRESH_BINDING =
+    "com.yagay.YBrowser.extra.FRESH_AI_BINDING"
 
 @Composable
 private fun YagaYHubTheme(content: @Composable () -> Unit) {
