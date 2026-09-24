@@ -5178,7 +5178,6 @@ private fun probeArtifactRange(
     token: String,
 ): RangeProbe? {
     repeat(DOWNLOAD_RETRY_COUNT) { attempt ->
-        control.checkpoint()
         val url = resolveArtifactDownloadUrl(
             owner,
             repo,
@@ -5646,6 +5645,7 @@ private fun downloadArtifactToTemp(
     partFile.delete()
     metaFile.delete()
     repeat(DOWNLOAD_RETRY_COUNT) { attempt ->
+        control.checkpoint()
         val url = resolveArtifactDownloadUrl(
             owner,
             repo,
