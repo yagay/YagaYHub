@@ -7667,9 +7667,12 @@ private fun startChatGptBinding(
             app.repoOwner + "/" + repo,
         )
         putExtra(EXTRA_CHAT_BIND_PROJECT, app.name)
-        currentBinding?.url
-            ?.takeIf { it.isNotBlank() }
-            ?.let { putExtra(YBROWSER_EXTRA_URL, it) }
+        putExtra(
+            YBROWSER_EXTRA_URL,
+            currentBinding?.url
+                ?.takeIf { it.isNotBlank() }
+                ?: CHATGPT_NEW_CHAT_URL,
+        )
     }
     try {
         context.startActivity(intent)
@@ -7884,6 +7887,8 @@ private const val EXTRA_BIND_REQUESTER_PACKAGE =
 private const val EXTRA_AI_WINDOW_ID =
     "com.yagay.YBrowser.extra.AI_WINDOW_ID"
 
+private const val CHATGPT_NEW_CHAT_URL =
+    "https://chatgpt.com/"
 private const val YBROWSER_PACKAGE = "com.yagay.YBrowser"
 private const val YBROWSER_OPEN_AI_ACTION =
     "com.yagay.YBrowser.action.OPEN_AI"
