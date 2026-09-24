@@ -4477,6 +4477,7 @@ private data class DownloadResult(
     val message: String,
     val extractedApks: List<ExtractedApk> = emptyList(),
     val outputUri: Uri? = null,
+    val cancelled: Boolean = false,
 )
 
 private data class TempArtifactDownload(
