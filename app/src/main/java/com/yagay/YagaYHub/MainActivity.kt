@@ -480,11 +480,15 @@ class ArtifactDownloadService : Service() {
     ) {
         val control =
             controls[request.artifactId]
-                ?: return
-        control.pause()
+        control?.pause()
 
         val state =
             taskStates[request.artifactId]
+                ?: loadActiveDownloadStates(this)
+                    .firstOrNull {
+                        it.artifactId ==
+                            request.artifactId
+                    }
                 ?: request.toDownloadUiState()
         publishState(
             request,
@@ -879,10 +883,7 @@ private fun controlArtifactDownload(
     val intent =
         request.toIntent(context)
             .setAction(action)
-    ContextCompat.startForegroundService(
-        context,
-        intent,
-    )
+    context.startService(intent)
 }
 
 private fun artifactResumeKey(
@@ -3724,7 +3725,19 @@ private fun loadDownloadHistory(
 
     discoverDownloadedFiles(
         context
-    ).forEach { file ->
+    )
+        .groupBy {
+            it.name
+                .trim()
+                .lowercase()
+        }
+        .values
+        .mapNotNull { files ->
+            files.maxByOrNull {
+                it.modifiedAt
+            }
+        }
+        .forEach { file ->
         val key =
             file.name
                 .trim()
