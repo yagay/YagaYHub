@@ -342,12 +342,8 @@ class ArtifactDownloadService : Service() {
                 return START_NOT_STICKY
             }
 
-            val initialState = DownloadUiState(
-                appName = request.appName,
-                stage = "准备后台下载",
-                totalBytes = request.expectedSizeBytes,
-                running = true,
-            )
+            val initialState =
+                request.toDownloadUiState()
             saveDownloadUiState(this, initialState)
             broadcastDownloadState(this, initialState)
 
@@ -408,13 +404,13 @@ class ArtifactDownloadService : Service() {
             onProgress = { downloaded, total, stage ->
                 latestDownloaded = downloaded
                 latestTotal = total ?: latestTotal
-                val state = DownloadUiState(
-                    appName = request.appName,
-                    stage = stage,
-                    downloadedBytes = downloaded,
-                    totalBytes = latestTotal,
-                    running = true,
-                )
+                val state =
+                    request.toDownloadUiState(
+                        stage = stage,
+                        downloadedBytes = downloaded,
+                        totalBytes = latestTotal,
+                        running = true,
+                    )
                 saveDownloadUiState(this, state)
                 broadcastDownloadState(this, state)
                 updateDownloadTaskNotification(
@@ -425,19 +421,23 @@ class ArtifactDownloadService : Service() {
             },
         )
 
-        val finalState = DownloadUiState(
-            appName = request.appName,
-            stage = if (result.success) {
-                "下载完成"
-            } else {
-                "下载失败 · 再次下载可断点重试"
-            },
-            downloadedBytes = latestDownloaded,
-            totalBytes = latestTotal,
-            running = false,
-            message = result.message,
-            apks = result.extractedApks,
-        )
+        val finalState =
+            request.toDownloadUiState(
+                stage =
+                    if (result.success) {
+                        "下载完成"
+                    } else {
+                        "下载失败 · 再次下载可断点重试"
+                    },
+                downloadedBytes = latestDownloaded,
+                totalBytes = latestTotal,
+                running = false,
+                message = result.message,
+                apks = result.extractedApks,
+                fileUri =
+                    result.outputUri
+                        ?.toString(),
+            )
         saveDownloadUiState(this, finalState)
         appendDownloadHistory(this, finalState)
         broadcastDownloadState(this, finalState)
@@ -532,6 +532,41 @@ private data class ArtifactDownloadRequest(
         }
     }
 }
+
+private fun ArtifactDownloadRequest.toDownloadUiState(
+    stage: String = "准备后台下载",
+    downloadedBytes: Long = 0L,
+    totalBytes: Long? = expectedSizeBytes,
+    running: Boolean = true,
+    paused: Boolean = false,
+    cancelled: Boolean = false,
+    message: String? = null,
+    apks: List<ExtractedApk> = emptyList(),
+    fileUri: String? = null,
+): DownloadUiState =
+    DownloadUiState(
+        appName = appName,
+        owner = owner,
+        repo = repo,
+        runId = runId,
+        artifactId = artifactId,
+        artifactName = artifactName,
+        fileName =
+            sanitizeArtifactZipName(
+                repo,
+                artifactName,
+                artifactId,
+            ),
+        fileUri = fileUri,
+        stage = stage,
+        downloadedBytes = downloadedBytes,
+        totalBytes = totalBytes,
+        running = running,
+        paused = paused,
+        cancelled = cancelled,
+        message = message,
+        apks = apks,
+    )
 
 private data class ActionsArtifact(
     val id: Long,
@@ -798,21 +833,13 @@ private fun HubScreen(
                         Manifest.permission.POST_NOTIFICATIONS
                     )
                 }
-                downloadUiState = DownloadUiState(
-                    appName = selection.appName,
-                    stage = "准备后台下载",
-                    totalBytes = artifact.sizeBytes.takeIf { it > 0L },
-                    running = true,
-                )
+                downloadUiState =
+                    request.toDownloadUiState()
                 showDownloadPanel = true
             } else {
                 startArtifactDownloadService(context, request)
-                downloadUiState = DownloadUiState(
-                    appName = selection.appName,
-                    stage = "准备后台下载",
-                    totalBytes = artifact.sizeBytes.takeIf { it > 0L },
-                    running = true,
-                )
+                downloadUiState =
+                    request.toDownloadUiState()
                 showDownloadPanel = true
             }
         }
@@ -2323,12 +2350,8 @@ private fun startArtifactDownloadService(
     context: Context,
     request: ArtifactDownloadRequest,
 ) {
-    val state = DownloadUiState(
-        appName = request.appName,
-        stage = "准备后台下载",
-        totalBytes = request.expectedSizeBytes,
-        running = true,
-    )
+    val state =
+        request.toDownloadUiState()
     saveDownloadUiState(context, state)
     ContextCompat.startForegroundService(context, request.toIntent(context))
 }
