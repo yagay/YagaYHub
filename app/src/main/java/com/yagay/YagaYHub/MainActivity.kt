@@ -2517,10 +2517,21 @@ private fun broadcastDownloadState(
         Intent(ACTION_DOWNLOAD_STATE).apply {
             setPackage(context.packageName)
             putExtra(EXTRA_STATE_APP_NAME, state.appName)
+            putExtra(EXTRA_STATE_OWNER, state.owner)
+            putExtra(EXTRA_STATE_REPO, state.repo)
+            putExtra(EXTRA_STATE_RUN_ID, state.runId)
+            putExtra(EXTRA_STATE_ARTIFACT_ID, state.artifactId)
+            putExtra(EXTRA_STATE_ARTIFACT_NAME, state.artifactName)
+            putExtra(EXTRA_STATE_FILE_NAME, state.fileName)
+            state.fileUri?.let {
+                putExtra(EXTRA_STATE_FILE_URI, it)
+            }
             putExtra(EXTRA_STATE_STAGE, state.stage)
             putExtra(EXTRA_STATE_DOWNLOADED, state.downloadedBytes)
             state.totalBytes?.let { putExtra(EXTRA_STATE_TOTAL, it) }
             putExtra(EXTRA_STATE_RUNNING, state.running)
+            putExtra(EXTRA_STATE_PAUSED, state.paused)
+            putExtra(EXTRA_STATE_CANCELLED, state.cancelled)
             state.message?.let { putExtra(EXTRA_STATE_MESSAGE, it) }
             putStringArrayListExtra(
                 EXTRA_STATE_APK_NAMES,
@@ -2543,10 +2554,44 @@ private fun downloadUiStateFromIntent(intent: Intent): DownloadUiState? {
     }
     return DownloadUiState(
         appName = appName,
+        owner = intent.getStringExtra(EXTRA_STATE_OWNER).orEmpty(),
+        repo = intent.getStringExtra(EXTRA_STATE_REPO).orEmpty(),
+        runId = intent.getLongExtra(EXTRA_STATE_RUN_ID, 0L),
+        artifactId = intent.getLongExtra(EXTRA_STATE_ARTIFACT_ID, 0L),
+        artifactName =
+            intent.getStringExtra(
+                EXTRA_STATE_ARTIFACT_NAME,
+            ).orEmpty(),
+        fileName =
+            intent.getStringExtra(
+                EXTRA_STATE_FILE_NAME,
+            ).orEmpty(),
+        fileUri =
+            intent.getStringExtra(
+                EXTRA_STATE_FILE_URI,
+            ),
         stage = intent.getStringExtra(EXTRA_STATE_STAGE).orEmpty(),
         downloadedBytes = intent.getLongExtra(EXTRA_STATE_DOWNLOADED, 0L),
-        totalBytes = intent.getLongExtra(EXTRA_STATE_TOTAL, -1L).takeIf { it > 0L },
-        running = intent.getBooleanExtra(EXTRA_STATE_RUNNING, false),
+        totalBytes =
+            intent.getLongExtra(
+                EXTRA_STATE_TOTAL,
+                -1L,
+            ).takeIf { it > 0L },
+        running =
+            intent.getBooleanExtra(
+                EXTRA_STATE_RUNNING,
+                false,
+            ),
+        paused =
+            intent.getBooleanExtra(
+                EXTRA_STATE_PAUSED,
+                false,
+            ),
+        cancelled =
+            intent.getBooleanExtra(
+                EXTRA_STATE_CANCELLED,
+                false,
+            ),
         message = intent.getStringExtra(EXTRA_STATE_MESSAGE),
         apks = apks,
     )
@@ -5978,10 +6023,19 @@ private const val EXTRA_DOWNLOAD_ARTIFACT_NAME = "download_artifact_name"
 private const val EXTRA_DOWNLOAD_EXPECTED_SIZE = "download_expected_size"
 
 private const val EXTRA_STATE_APP_NAME = "state_app_name"
+private const val EXTRA_STATE_OWNER = "state_owner"
+private const val EXTRA_STATE_REPO = "state_repo"
+private const val EXTRA_STATE_RUN_ID = "state_run_id"
+private const val EXTRA_STATE_ARTIFACT_ID = "state_artifact_id"
+private const val EXTRA_STATE_ARTIFACT_NAME = "state_artifact_name"
+private const val EXTRA_STATE_FILE_NAME = "state_file_name"
+private const val EXTRA_STATE_FILE_URI = "state_file_uri"
 private const val EXTRA_STATE_STAGE = "state_stage"
 private const val EXTRA_STATE_DOWNLOADED = "state_downloaded"
 private const val EXTRA_STATE_TOTAL = "state_total"
 private const val EXTRA_STATE_RUNNING = "state_running"
+private const val EXTRA_STATE_PAUSED = "state_paused"
+private const val EXTRA_STATE_CANCELLED = "state_cancelled"
 private const val EXTRA_STATE_MESSAGE = "state_message"
 private const val EXTRA_STATE_APK_NAMES = "state_apk_names"
 private const val EXTRA_STATE_APK_URIS = "state_apk_uris"
