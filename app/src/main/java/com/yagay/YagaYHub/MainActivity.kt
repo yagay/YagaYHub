@@ -2807,8 +2807,18 @@ private fun startArtifactDownloadService(
 ) {
     val state =
         request.toDownloadUiState()
-    saveDownloadUiState(context, state)
-    ContextCompat.startForegroundService(context, request.toIntent(context))
+    saveDownloadUiState(
+        context,
+        state,
+    )
+    saveActiveDownloadState(
+        context,
+        state,
+    )
+    ContextCompat.startForegroundService(
+        context,
+        request.toIntent(context),
+    )
 }
 
 private fun ensureDownloadNotificationChannel(context: Context) {
