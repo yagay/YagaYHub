@@ -2798,7 +2798,11 @@ private fun buildDownloadNotification(
         }
     }
 
-    return Notification.Builder(context, DOWNLOAD_CHANNEL_ID)
+    val builder =
+        Notification.Builder(
+            context,
+            DOWNLOAD_CHANNEL_ID,
+        )
         .setSmallIcon(
             if (state.running) {
                 android.R.drawable.stat_sys_download
@@ -2822,7 +2826,73 @@ private fun buildDownloadNotification(
                     setProgress(0, 0, false)
             }
         }
-        .build()
+
+    val request =
+        state.toDownloadRequestOrNull()
+    if (
+        state.running &&
+        request != null
+    ) {
+        val toggleAction =
+            if (state.paused) {
+                ACTION_DOWNLOAD_RESUME
+            } else {
+                ACTION_DOWNLOAD_PAUSE
+            }
+        val toggleIntent =
+            request.toIntent(context)
+                .setAction(toggleAction)
+        val togglePending =
+            PendingIntent.getService(
+                context,
+                (
+                    state.artifactId xor
+                        (state.artifactId ushr 32)
+                    ).toInt() +
+                    if (state.paused) {
+                        31_000
+                    } else {
+                        30_000
+                    },
+                toggleIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or
+                    PendingIntent.FLAG_IMMUTABLE,
+            )
+        builder.addAction(
+            0,
+            if (state.paused) {
+                "继续"
+            } else {
+                "暂停"
+            },
+            togglePending,
+        )
+
+        val cancelIntent =
+            request.toIntent(context)
+                .setAction(
+                    ACTION_DOWNLOAD_CANCEL
+                )
+        val cancelPending =
+            PendingIntent.getService(
+                context,
+                (
+                    state.artifactId xor
+                        (state.artifactId ushr 32)
+                    ).toInt() +
+                    32_000,
+                cancelIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or
+                    PendingIntent.FLAG_IMMUTABLE,
+            )
+        builder.addAction(
+            0,
+            "取消",
+            cancelPending,
+        )
+    }
+
+    return builder.build()
 }
 
 private fun updateDownloadNotification(
@@ -6606,6 +6676,12 @@ private const val CHAT_BINDINGS_MIGRATED_KEY = "bindings_v2_migrated"
 private const val DOWNLOAD_CHANNEL_ID = "artifact_downloads"
 private const val DOWNLOAD_NOTIFICATION_ID = 4107
 private const val ACTION_DOWNLOAD_STATE = "com.yagay.YagaYHub.action.DOWNLOAD_STATE"
+private const val ACTION_DOWNLOAD_PAUSE =
+    "com.yagay.YagaYHub.action.DOWNLOAD_PAUSE"
+private const val ACTION_DOWNLOAD_RESUME =
+    "com.yagay.YagaYHub.action.DOWNLOAD_RESUME"
+private const val ACTION_DOWNLOAD_CANCEL =
+    "com.yagay.YagaYHub.action.DOWNLOAD_CANCEL"
 
 private const val EXTRA_DOWNLOAD_APP_NAME = "download_app_name"
 private const val EXTRA_DOWNLOAD_OWNER = "download_owner"
