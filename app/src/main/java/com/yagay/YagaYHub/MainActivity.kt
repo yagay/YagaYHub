@@ -307,11 +307,13 @@ class ChatBindingCommandReceiver : BroadcastReceiver() {
                     title = title,
                     url = url,
                 )
-                Toast.makeText(
-                    context,
-                    "已绑定 AI · " + repo.substringAfter('/'),
-                    Toast.LENGTH_SHORT,
-                ).show()
+                if (!intent.getBooleanExtra(EXTRA_CHAT_BIND_SILENT, false)) {
+                    Toast.makeText(
+                        context,
+                        "已绑定 AI · " + repo.substringAfter('/'),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
             }
         }
     }
@@ -7322,6 +7324,8 @@ private const val EXTRA_CHAT_BIND_REPO = "com.yagay.YBrowser.extra.BIND_REPO"
 private const val EXTRA_CHAT_BIND_PROJECT = "com.yagay.YBrowser.extra.BIND_PROJECT"
 private const val EXTRA_CHAT_BIND_URL = "com.yagay.YBrowser.extra.BIND_URL"
 private const val EXTRA_CHAT_BIND_TITLE = "com.yagay.YBrowser.extra.BIND_TITLE"
+private const val EXTRA_CHAT_BIND_SILENT =
+    "com.yagay.YBrowser.extra.BIND_SILENT_SYNC"
 private const val EXTRA_CHAT_TARGETS_JSON =
     "com.yagay.YBrowser.extra.CHAT_TARGETS_JSON"
 private const val CHAT_BINDINGS_PREFS = "chatgpt_bindings"
@@ -7523,13 +7527,25 @@ private fun saveChatBinding(
     if (key.isBlank() || normalizedUrl.isBlank()) return
 
     val existing = loadAllChatBindings(context)
+    val previousProjectBinding =
+        existing.firstOrNull {
+            it.repoKey == key
+        }
     val sameBinding = existing.firstOrNull {
-        it.repoKey == key && sameChatBindingUrl(it.url, normalizedUrl)
+        it.repoKey == key &&
+            sameChatBindingUrl(it.url, normalizedUrl)
     }
-    val addedAt = sameBinding?.addedAt?.takeIf { it > 0L }
-        ?: System.currentTimeMillis()
+    val addedAt =
+        sameBinding?.addedAt?.takeIf { it > 0L }
+            ?: previousProjectBinding
+                ?.addedAt
+                ?.takeIf { it > 0L }
+            ?: System.currentTimeMillis()
 
-    // One AI page can belong to only one project.
+    // A project owns one active web conversation. Rebinding replaces the
+    // current URL; the accumulated Native AI history is kept by the project
+    // key inside YBrowser and is independent from this page pointer.
+    // A page also cannot belong to two projects at the same time.
     val merged = buildList {
         add(
             ChatBinding(
@@ -7540,7 +7556,13 @@ private fun saveChatBinding(
             ),
         )
         existing
-            .filterNot { sameChatBindingUrl(it.url, normalizedUrl) }
+            .filterNot {
+                it.repoKey == key ||
+                    sameChatBindingUrl(
+                        it.url,
+                        normalizedUrl,
+                    )
+            }
             .forEach(::add)
     }
     saveAllChatBindings(context, merged)
