@@ -3077,6 +3077,132 @@ private fun downloadStateFromJson(json: JSONObject): DownloadUiState {
     )
 }
 
+private val downloadStatePrefsLock = Any()
+
+private fun loadActiveDownloadStates(
+    context: Context,
+): List<DownloadUiState> {
+    val raw =
+        context.getSharedPreferences(
+            TOKEN_PREFS,
+            Context.MODE_PRIVATE,
+        ).getString(
+            DOWNLOAD_ACTIVE_JSON,
+            null,
+        ) ?: return emptyList()
+
+    return runCatching {
+        val array = JSONArray(raw)
+        buildList {
+            for (
+                index in 0 until array.length()
+            ) {
+                val item =
+                    array.optJSONObject(index)
+                        ?: continue
+                val state =
+                    downloadStateFromJson(item)
+                if (
+                    state.artifactId > 0L &&
+                    state.running
+                ) {
+                    add(state)
+                }
+            }
+        }.sortedBy {
+            it.appName.lowercase()
+        }
+    }.getOrDefault(
+        emptyList()
+    )
+}
+
+private fun saveActiveDownloadStates(
+    context: Context,
+    states: List<DownloadUiState>,
+) {
+    val json =
+        JSONArray().apply {
+            states
+                .filter {
+                    it.artifactId > 0L &&
+                        it.running
+                }
+                .distinctBy {
+                    it.artifactId
+                }
+                .forEach {
+                    put(
+                        downloadStateToJson(
+                            it
+                        )
+                    )
+                }
+        }
+    context.getSharedPreferences(
+        TOKEN_PREFS,
+        Context.MODE_PRIVATE,
+    ).edit()
+        .putString(
+            DOWNLOAD_ACTIVE_JSON,
+            json.toString(),
+        )
+        .apply()
+}
+
+private fun saveActiveDownloadState(
+    context: Context,
+    state: DownloadUiState,
+) {
+    if (
+        state.artifactId <= 0L ||
+        !state.running
+    ) {
+        return
+    }
+
+    synchronized(
+        downloadStatePrefsLock
+    ) {
+        val merged =
+            buildList {
+                add(state)
+                loadActiveDownloadStates(
+                    context
+                )
+                    .filterNot {
+                        it.artifactId ==
+                            state.artifactId
+                    }
+                    .forEach(::add)
+            }
+        saveActiveDownloadStates(
+            context,
+            merged,
+        )
+    }
+}
+
+private fun removeActiveDownloadState(
+    context: Context,
+    artifactId: Long,
+) {
+    if (artifactId <= 0L) return
+    synchronized(
+        downloadStatePrefsLock
+    ) {
+        saveActiveDownloadStates(
+            context,
+            loadActiveDownloadStates(
+                context
+            ).filterNot {
+                it.artifactId ==
+                    artifactId
+            },
+        )
+    }
+}
+
 private fun downloadHistoryKey(state: DownloadUiState): String {
     val downloadedFile =
         state.fileName
@@ -6463,6 +6589,7 @@ private const val LAYOUT_MODE = "layout_mode"
 private const val SORT_MODE = "sort_mode"
 private const val SORT_ASCENDING = "sort_ascending"
 private const val DOWNLOAD_STATE_JSON = "download_state_json"
+private const val DOWNLOAD_ACTIVE_JSON = "download_active_json"
 private const val DOWNLOAD_HISTORY_JSON = "download_history_json"
 private const val DOWNLOAD_HISTORY_LIMIT = 200
 private const val DOWNLOAD_SEGMENT_THREADS = 4
