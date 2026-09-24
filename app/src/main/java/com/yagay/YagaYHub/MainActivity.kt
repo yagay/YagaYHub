@@ -836,6 +836,129 @@ private fun ArtifactDownloadRequest.toDownloadUiState(
         apks = apks,
     )
 
+private fun DownloadUiState.toDownloadRequestOrNull():
+    ArtifactDownloadRequest? {
+    if (
+        owner.isBlank() ||
+        repo.isBlank() ||
+        runId <= 0L ||
+        artifactId <= 0L
+    ) {
+        return null
+    }
+    return ArtifactDownloadRequest(
+        appName = appName,
+        owner = owner,
+        repo = repo,
+        runId = runId,
+        artifactId = artifactId,
+        artifactName =
+            artifactName.ifBlank {
+                fileName
+                    .removeSuffix(".zip")
+                    .ifBlank {
+                        repo + "-" +
+                            artifactId
+                    }
+            },
+        expectedSizeBytes =
+            totalBytes?.takeIf {
+                it > 0L
+            },
+    )
+}
+
+private fun controlArtifactDownload(
+    context: Context,
+    state: DownloadUiState,
+    action: String,
+) {
+    val request =
+        state.toDownloadRequestOrNull()
+            ?: return
+    val intent =
+        request.toIntent(context)
+            .setAction(action)
+    ContextCompat.startForegroundService(
+        context,
+        intent,
+    )
+}
+
+private fun artifactResumeKey(
+    owner: String,
+    repo: String,
+    artifactId: Long,
+): String =
+    (
+        owner + "_" +
+            repo + "_" +
+            artifactId
+        )
+        .replace(
+            Regex(
+                "[^A-Za-z0-9._-]"
+            ),
+            "_",
+        )
+
+private fun artifactResumeFiles(
+    context: Context,
+    request: ArtifactDownloadRequest,
+): Pair<File, File> {
+    val directory =
+        File(
+            context.filesDir,
+            "artifact_parts",
+        ).apply {
+            mkdirs()
+        }
+    val key =
+        artifactResumeKey(
+            request.owner,
+            request.repo,
+            request.artifactId,
+        )
+    return File(
+        directory,
+        key + ".part",
+    ) to File(
+        directory,
+        key + ".json",
+    )
+}
+
+private fun hasArtifactResumeData(
+    context: Context,
+    request: ArtifactDownloadRequest,
+): Boolean {
+    val (part, meta) =
+        artifactResumeFiles(
+            context,
+            request,
+        )
+    return part.exists() &&
+        meta.exists() &&
+        part.length() > 0L
+}
+
+private fun deleteArtifactResumeData(
+    context: Context,
+    request: ArtifactDownloadRequest,
+) {
+    val (part, meta) =
+        artifactResumeFiles(
+            context,
+            request,
+        )
+    runCatching {
+        part.delete()
+    }
+    runCatching {
+        meta.delete()
+    }
+}
+
 private data class ActionsArtifact(
     val id: Long,
     val name: String,
