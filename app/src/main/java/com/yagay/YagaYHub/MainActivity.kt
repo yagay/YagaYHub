@@ -4829,6 +4829,7 @@ private fun probeArtifactRange(
     token: String,
 ): RangeProbe? {
     repeat(DOWNLOAD_RETRY_COUNT) { attempt ->
+        control.checkpoint()
         val url = resolveArtifactDownloadUrl(
             owner,
             repo,
@@ -4977,16 +4978,21 @@ private fun downloadArtifactToTemp(
     artifactId: Long,
     token: String,
     expectedSizeBytes: Long?,
+    control: DownloadControl,
     onProgress: (Long, Long?, String) -> Unit,
 ): TempDownloadResult {
+    control.checkpoint()
+
     val partDir = File(
         context.filesDir,
         "artifact_parts",
     ).apply { mkdirs() }
-    val key = (
-        owner + "_" + repo + "_" + artifactId
+    val key =
+        artifactResumeKey(
+            owner,
+            repo,
+            artifactId,
         )
-        .replace(Regex("[^A-Za-z0-9._-]"), "_")
     val partFile = File(partDir, key + ".part")
     val metaFile = File(partDir, key + ".json")
 
@@ -4995,6 +5001,7 @@ private fun downloadArtifactToTemp(
         expectedSizeBytes,
         "检查断点与服务器分段支持…",
     )
+    control.checkpoint()
     val probe = probeArtifactRange(
         owner,
         repo,
@@ -5123,6 +5130,7 @@ private fun downloadArtifactToTemp(
                     while (
                         counters.get(index) < segment.length
                     ) {
+                        control.checkpoint()
                         val done = counters.get(index)
                         val from = segment.start + done
                         val url = resolveArtifactDownloadUrl(
@@ -5165,6 +5173,7 @@ private fun downloadArtifactToTemp(
                                         counters.get(index) <
                                         segment.length
                                     ) {
+                                        control.checkpoint()
                                         val remaining =
                                             segment.length -
                                                 counters.get(index)
@@ -5200,6 +5209,11 @@ private fun downloadArtifactToTemp(
                                 )
                             }
                             retries = 0
+                        } catch (
+                            cancelled:
+                                DownloadCancelledException
+                        ) {
+                            throw cancelled
                         } catch (error: Exception) {
                             retries++
                             if (
@@ -5214,6 +5228,11 @@ private fun downloadArtifactToTemp(
                             connection?.disconnect()
                         }
                     }
+                } catch (
+                    cancelled:
+                        DownloadCancelledException
+                ) {
+                    // All segment workers observe the same control state.
                 } catch (error: Exception) {
                     synchronized(lock) {
                         errors += (
@@ -5238,6 +5257,10 @@ private fun downloadArtifactToTemp(
 
         latch.await()
         publishProgress(force = true)
+
+        if (control.cancelled) {
+            throw DownloadCancelledException()
+        }
 
         if (errors.isNotEmpty()) {
             return TempDownloadResult(
@@ -5307,6 +5330,7 @@ private fun downloadArtifactToTemp(
                 connection.inputStream.use { input ->
                     val buffer = ByteArray(128 * 1024)
                     while (true) {
+                        control.checkpoint()
                         val read = input.read(buffer)
                         if (read < 0) break
                         output.write(buffer, 0, read)
@@ -5329,6 +5353,11 @@ private fun downloadArtifactToTemp(
                 ),
                 message = "下载完成",
             )
+        } catch (
+            cancelled:
+                DownloadCancelledException
+        ) {
+            throw cancelled
         } catch (_: Exception) {
             partFile.delete()
             if (attempt + 1 < DOWNLOAD_RETRY_COUNT) {
@@ -5376,12 +5405,14 @@ private fun downloadArtifactZip(
     destinationTreeUri: String,
     rootEnhancedCleanup: Boolean,
     expectedSizeBytes: Long? = null,
+    control: DownloadControl,
     onProgress: (Long, Long?, String) -> Unit =
         { _, _, _ -> },
 ): DownloadResult {
     var outputUri: Uri? = null
 
     return try {
+        control.checkpoint()
         val tempResult = downloadArtifactToTemp(
             context = context,
             owner = owner,
@@ -5389,6 +5420,7 @@ private fun downloadArtifactZip(
             artifactId = artifactId,
             token = token,
             expectedSizeBytes = expectedSizeBytes,
+            control = control,
             onProgress = onProgress,
         )
         val temp = tempResult.temp
@@ -5443,10 +5475,19 @@ private fun downloadArtifactZip(
                 temp.file.inputStream()
                     .buffered()
                     .use { input ->
-                        input.copyTo(
-                            output,
-                            256 * 1024,
-                        )
+                        val buffer =
+                            ByteArray(256 * 1024)
+                        while (true) {
+                            control.checkpoint()
+                            val read =
+                                input.read(buffer)
+                            if (read < 0) break
+                            output.write(
+                                buffer,
+                                0,
+                                read,
+                            )
+                        }
                     }
             }
             ?: return DownloadResult(
@@ -5461,6 +5502,7 @@ private fun downloadArtifactZip(
             "解压 APK…",
         )
 
+        control.checkpoint()
         val extractedApks = extractApksFromZip(
             context = context,
             zipUri = destination.uri,
@@ -5519,6 +5561,24 @@ private fun downloadArtifactZip(
             },
             extractedApks = extractedApks,
             outputUri = destination.uri,
+        )
+    } catch (
+        cancelled:
+            DownloadCancelledException
+    ) {
+        outputUri?.let { uri ->
+            runCatching {
+                context.contentResolver.delete(
+                    uri,
+                    null,
+                    null,
+                )
+            }
+        }
+        DownloadResult(
+            success = false,
+            message = "下载已取消",
+            cancelled = true,
         )
     } catch (error: Exception) {
         outputUri?.let { uri ->
