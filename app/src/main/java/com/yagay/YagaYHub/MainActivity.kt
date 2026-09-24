@@ -2530,39 +2530,31 @@ private fun downloadUiStateFromIntent(intent: Intent): DownloadUiState? {
 }
 
 private fun saveDownloadUiState(context: Context, state: DownloadUiState) {
-    val json = JSONObject().apply {
-        put("appName", state.appName)
-        put("stage", state.stage)
-        put("downloadedBytes", state.downloadedBytes)
-        put("totalBytes", state.totalBytes ?: JSONObject.NULL)
-        put("running", state.running)
-        put("message", state.message ?: JSONObject.NULL)
-        put(
-            "apks",
-            JSONArray().apply {
-                state.apks.forEach { apk ->
-                    put(
-                        JSONObject()
-                            .put("name", apk.name)
-                            .put("uri", apk.uri.toString())
-                    )
-                }
-            }
-        )
-    }
     context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
         .edit()
-        .putString(DOWNLOAD_STATE_JSON, json.toString())
+        .putString(
+            DOWNLOAD_STATE_JSON,
+            downloadStateToJson(state).toString(),
+        )
         .apply()
 }
 
 private fun downloadStateToJson(state: DownloadUiState): JSONObject =
     JSONObject().apply {
         put("appName", state.appName)
+        put("owner", state.owner)
+        put("repo", state.repo)
+        put("runId", state.runId)
+        put("artifactId", state.artifactId)
+        put("artifactName", state.artifactName)
+        put("fileName", state.fileName)
+        put("fileUri", state.fileUri ?: JSONObject.NULL)
         put("stage", state.stage)
         put("downloadedBytes", state.downloadedBytes)
         put("totalBytes", state.totalBytes ?: JSONObject.NULL)
         put("running", state.running)
+        put("paused", state.paused)
+        put("cancelled", state.cancelled)
         put("message", state.message ?: JSONObject.NULL)
         put(
             "apks",
@@ -2591,12 +2583,37 @@ private fun downloadStateFromJson(json: JSONObject): DownloadUiState {
         }
     }
     return DownloadUiState(
-        appName = json.getString("appName"),
+        appName = json.optString("appName"),
+        owner = json.optString("owner"),
+        repo = json.optString("repo"),
+        runId = json.optLong("runId", 0L),
+        artifactId = json.optLong("artifactId", 0L),
+        artifactName = json.optString("artifactName"),
+        fileName = json.optString("fileName"),
+        fileUri =
+            if (json.isNull("fileUri")) {
+                null
+            } else {
+                json.optString("fileUri")
+                    .takeIf { it.isNotBlank() }
+            },
         stage = json.optString("stage"),
         downloadedBytes = json.optLong("downloadedBytes", 0L),
-        totalBytes = if (json.isNull("totalBytes")) null else json.optLong("totalBytes"),
+        totalBytes =
+            if (json.isNull("totalBytes")) {
+                null
+            } else {
+                json.optLong("totalBytes")
+            },
         running = json.optBoolean("running", false),
-        message = if (json.isNull("message")) null else json.optString("message"),
+        paused = json.optBoolean("paused", false),
+        cancelled = json.optBoolean("cancelled", false),
+        message =
+            if (json.isNull("message")) {
+                null
+            } else {
+                json.optString("message")
+            },
         apks = apks,
     )
 }
