@@ -4503,7 +4503,7 @@ private fun AppListEntry(
                     ) {
                         Icon(
                             Icons.Outlined.PlayArrow,
-                            contentDescription = "打开最近一次 Actions",
+                            contentDescription = "打开 Actions 列表",
                             modifier = Modifier.size(15.dp),
                             tint = actionsColor,
                         )
