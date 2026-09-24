@@ -3459,44 +3459,166 @@ private fun loadDownloadUiState(context: Context): DownloadUiState? {
 @Composable
 private fun DownloadHistoryDialog(
     history: List<DownloadHistoryEntry>,
-    activeState: DownloadUiState?,
+    activeStates: List<DownloadUiState>,
     onDismiss: () -> Unit,
-    onOpenActive: () -> Unit,
+    onOpenActive: (DownloadUiState) -> Unit,
+    onPauseResume: (DownloadUiState) -> Unit,
+    onCancelActive: (DownloadUiState) -> Unit,
     onOpenHistory: (DownloadHistoryEntry) -> Unit,
     onClearHistory: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("下载历史") },
+        title = { Text("下载列表") },
         text = {
             LazyColumn(
                 modifier = Modifier.height(420.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement =
+                    Arrangement.spacedBy(8.dp),
             ) {
-                if (activeState != null) {
-                    item("active-download") {
+                if (activeStates.isNotEmpty()) {
+                    item("active-title") {
+                        Text(
+                            "进行中的下载",
+                            style =
+                                MaterialTheme.typography
+                                    .labelLarge,
+                            color =
+                                MaterialTheme.colorScheme
+                                    .onSurfaceVariant,
+                        )
+                    }
+
+                    lazyItems(
+                        items = activeStates,
+                        key = {
+                            "active-" +
+                                it.artifactId
+                        },
+                    ) { state ->
                         Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(onClick = onOpenActive),
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            shape =
+                                RoundedCornerShape(12.dp),
+                            color =
+                                MaterialTheme.colorScheme
+                                    .primaryContainer,
                         ) {
                             Column(
-                                modifier = Modifier.padding(
-                                    horizontal = 12.dp,
-                                    vertical = 10.dp,
-                                ),
+                                modifier =
+                                    Modifier.padding(
+                                        horizontal = 12.dp,
+                                        vertical = 8.dp,
+                                    ),
+                                verticalArrangement =
+                                    Arrangement.spacedBy(
+                                        4.dp
+                                    ),
                             ) {
-                                Text(
-                                    activeState.appName,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                Text(
-                                    "正在下载 · " + activeState.stage,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                Column(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                onOpenActive(
+                                                    state
+                                                )
+                                            },
+                                ) {
+                                    Text(
+                                        state.fileName
+                                            .ifBlank {
+                                                state.appName
+                                            },
+                                        fontWeight =
+                                            FontWeight
+                                                .SemiBold,
+                                        maxLines = 2,
+                                        overflow =
+                                            TextOverflow
+                                                .Ellipsis,
+                                    )
+                                    Text(
+                                        (
+                                            if (
+                                                state.paused
+                                            ) {
+                                                "已暂停"
+                                            } else {
+                                                "正在下载"
+                                            }
+                                            ) +
+                                            " · " +
+                                            state.stage,
+                                        style =
+                                            MaterialTheme
+                                                .typography
+                                                .bodySmall,
+                                        color =
+                                            MaterialTheme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                    )
+                                    if (
+                                        state.totalBytes !=
+                                        null
+                                    ) {
+                                        Text(
+                                            formatFileSize(
+                                                state
+                                                    .downloadedBytes
+                                            ) +
+                                                " / " +
+                                                formatFileSize(
+                                                    state
+                                                        .totalBytes
+                                                ),
+                                            style =
+                                                MaterialTheme
+                                                    .typography
+                                                    .labelSmall,
+                                            color =
+                                                MaterialTheme
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    horizontalArrangement =
+                                        Arrangement.spacedBy(
+                                            6.dp
+                                        ),
+                                ) {
+                                    TextButton(
+                                        onClick = {
+                                            onPauseResume(
+                                                state
+                                            )
+                                        },
+                                    ) {
+                                        Text(
+                                            if (
+                                                state.paused
+                                            ) {
+                                                "继续"
+                                            } else {
+                                                "暂停"
+                                            }
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            onCancelActive(
+                                                state
+                                            )
+                                        },
+                                    ) {
+                                        Text("取消")
+                                    }
+                                }
                             }
                         }
                     }
@@ -3505,53 +3627,110 @@ private fun DownloadHistoryDialog(
                 if (history.isEmpty()) {
                     item("empty-history") {
                         Text(
-                            if (activeState == null) "暂无下载历史" else "暂无已完成下载",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            if (
+                                activeStates.isEmpty()
+                            ) {
+                                "暂无下载记录"
+                            } else {
+                                "暂无已完成下载"
+                            },
+                            color =
+                                MaterialTheme.colorScheme
+                                    .onSurfaceVariant,
                         )
                     }
                 } else {
+                    item("history-title") {
+                        Text(
+                            "已下载",
+                            style =
+                                MaterialTheme.typography
+                                    .labelLarge,
+                            color =
+                                MaterialTheme.colorScheme
+                                    .onSurfaceVariant,
+                        )
+                    }
                     lazyItems(
                         items = history,
                         key = { it.id },
                     ) { entry ->
                         val state = entry.state
-                        val primaryName = state.apks.firstOrNull()?.name
-                            ?: state.appName
+                        val primaryName =
+                            state.fileName
+                                .ifBlank {
+                                    state.apks
+                                        .firstOrNull()
+                                        ?.name
+                                        ?: state.appName
+                                }
                         Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onOpenHistory(entry) },
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onOpenHistory(
+                                            entry
+                                        )
+                                    },
+                            shape =
+                                RoundedCornerShape(12.dp),
+                            color =
+                                MaterialTheme.colorScheme
+                                    .surfaceContainer,
                         ) {
                             Column(
-                                modifier = Modifier.padding(
-                                    horizontal = 12.dp,
-                                    vertical = 10.dp,
-                                ),
+                                modifier =
+                                    Modifier.padding(
+                                        horizontal = 12.dp,
+                                        vertical = 10.dp,
+                                    ),
                             ) {
                                 Text(
                                     primaryName,
-                                    fontWeight = FontWeight.SemiBold,
+                                    fontWeight =
+                                        FontWeight.SemiBold,
                                     maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
+                                    overflow =
+                                        TextOverflow.Ellipsis,
                                 )
                                 Text(
-                                    state.appName + " · " +
-                                        android.text.format.DateFormat.format(
-                                            "MM-dd HH:mm",
-                                            entry.completedAt,
-                                        ),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    state.appName +
+                                        " · " +
+                                        android.text.format
+                                            .DateFormat.format(
+                                                "MM-dd HH:mm",
+                                                entry
+                                                    .completedAt,
+                                            ),
+                                    style =
+                                        MaterialTheme
+                                            .typography
+                                            .bodySmall,
+                                    color =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .onSurfaceVariant,
                                 )
-                                if (state.totalBytes != null) {
-                                    Text(
-                                        formatFileSize(state.totalBytes),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
+                                state.totalBytes
+                                    ?.takeIf {
+                                        it > 0L
+                                    }
+                                    ?.let { size ->
+                                        Text(
+                                            formatFileSize(
+                                                size
+                                            ),
+                                            style =
+                                                MaterialTheme
+                                                    .typography
+                                                    .labelSmall,
+                                            color =
+                                                MaterialTheme
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                        )
+                                    }
                             }
                         }
                     }
@@ -3565,7 +3744,9 @@ private fun DownloadHistoryDialog(
         },
         dismissButton = {
             if (history.isNotEmpty()) {
-                TextButton(onClick = onClearHistory) {
+                TextButton(
+                    onClick = onClearHistory
+                ) {
                     Text("清空历史")
                 }
             }
@@ -3578,6 +3759,8 @@ private fun DownloadPanel(
     state: DownloadUiState,
     onDismiss: () -> Unit,
     onInstall: (ExtractedApk) -> Unit,
+    onPauseResume: (() -> Unit)? = null,
+    onCancel: (() -> Unit)? = null,
 ) {
     val total = state.totalBytes?.takeIf { it > 0L }
     val progress = if (total != null) {
@@ -3676,7 +3859,39 @@ private fun DownloadPanel(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text(if (state.running) "后台运行" else "关闭")
+                Text(
+                    if (state.running) {
+                        "后台运行"
+                    } else {
+                        "关闭"
+                    }
+                )
+            }
+        },
+        dismissButton = {
+            if (state.running) {
+                Row {
+                    if (onPauseResume != null) {
+                        TextButton(
+                            onClick = onPauseResume
+                        ) {
+                            Text(
+                                if (state.paused) {
+                                    "继续"
+                                } else {
+                                    "暂停"
+                                }
+                            )
+                        }
+                    }
+                    if (onCancel != null) {
+                        TextButton(
+                            onClick = onCancel
+                        ) {
+                            Text("取消")
+                        }
+                    }
+                }
             }
         },
     )
