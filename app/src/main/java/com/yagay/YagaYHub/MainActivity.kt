@@ -7677,6 +7677,12 @@ private fun startChatGptBinding(
             YBROWSER_EXTRA_FRESH_BINDING,
             currentBinding == null,
         )
+        if (currentBinding == null) {
+            putExtra(
+                YBROWSER_EXTRA_FRESH_BINDING_TOKEN,
+                System.currentTimeMillis().toString(),
+            )
+        }
     }
     try {
         context.startActivity(intent)
@@ -7909,6 +7915,8 @@ private const val YBROWSER_EXTRA_YAGAYHUB_EMBEDDED =
     "com.yagay.YBrowser.extra.YAGAYHUB_EMBEDDED"
 private const val YBROWSER_EXTRA_FRESH_BINDING =
     "com.yagay.YBrowser.extra.FRESH_AI_BINDING"
+private const val YBROWSER_EXTRA_FRESH_BINDING_TOKEN =
+    "com.yagay.YBrowser.extra.FRESH_AI_BINDING_TOKEN"
 
 @Composable
 private fun YagaYHubTheme(content: @Composable () -> Unit) {
