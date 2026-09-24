@@ -3103,7 +3103,7 @@ private fun AppListEntry(
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(7.dp))
-                                .clickable(onClick = onActionsClick)
+                                .clickable(onClick = onLatestActionClick)
                                 .padding(vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -3158,7 +3158,7 @@ private fun AppListEntry(
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
                             .background(MaterialTheme.colorScheme.surface)
-                            .clickable(onClick = onLatestActionClick)
+                            .clickable(onClick = onActionsClick)
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -3360,7 +3360,7 @@ private fun AppEntry(
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onLatestActionClick)
+                        .clickable(onClick = onActionsClick)
                         .padding(horizontal = 4.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -3431,7 +3431,7 @@ private fun AppEntry(
                     "Actions " + actionTime,
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .clickable(onClick = onActionsClick)
+                        .clickable(onClick = onLatestActionClick)
                         .padding(horizontal = 2.dp, vertical = 1.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = when {
