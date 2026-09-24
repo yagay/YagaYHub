@@ -633,10 +633,19 @@ private data class QuickChatBindingRequest(
 
 private data class DownloadUiState(
     val appName: String,
+    val owner: String = "",
+    val repo: String = "",
+    val runId: Long = 0L,
+    val artifactId: Long = 0L,
+    val artifactName: String = "",
+    val fileName: String = "",
+    val fileUri: String? = null,
     val stage: String = "准备下载",
     val downloadedBytes: Long = 0L,
     val totalBytes: Long? = null,
     val running: Boolean = true,
+    val paused: Boolean = false,
+    val cancelled: Boolean = false,
     val message: String? = null,
     val apks: List<ExtractedApk> = emptyList(),
 )
