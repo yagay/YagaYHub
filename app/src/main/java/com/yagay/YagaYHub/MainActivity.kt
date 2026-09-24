@@ -3408,29 +3408,382 @@ private fun saveDownloadHistory(
         .apply()
 }
 
+private data class DiscoveredDownloadFile(
+    val name: String,
+    val uri: String,
+    val sizeBytes: Long?,
+    val modifiedAt: Long,
+)
+
+private fun discoverDownloadedFiles(
+    context: Context,
+): List<DiscoveredDownloadFile> {
+    val treeUriString =
+        loadDownloadDirectoryUri(context)
+
+    return if (treeUriString.isBlank()) {
+        val relativePath =
+            Environment.DIRECTORY_DOWNLOADS +
+                "/YagaYHub/"
+        val resolver =
+            context.contentResolver
+        buildList {
+            resolver.query(
+                MediaStore.Downloads
+                    .EXTERNAL_CONTENT_URI,
+                arrayOf(
+                    MediaStore.MediaColumns._ID,
+                    MediaStore.MediaColumns
+                        .DISPLAY_NAME,
+                    MediaStore.MediaColumns.SIZE,
+                    MediaStore.MediaColumns
+                        .DATE_MODIFIED,
+                ),
+                MediaStore.MediaColumns
+                    .RELATIVE_PATH +
+                    "=?",
+                arrayOf(relativePath),
+                MediaStore.MediaColumns
+                    .DATE_MODIFIED +
+                    " DESC",
+            )?.use { cursor ->
+                val idColumn =
+                    cursor.getColumnIndexOrThrow(
+                        MediaStore.MediaColumns._ID
+                    )
+                val nameColumn =
+                    cursor.getColumnIndexOrThrow(
+                        MediaStore.MediaColumns
+                            .DISPLAY_NAME
+                    )
+                val sizeColumn =
+                    cursor.getColumnIndexOrThrow(
+                        MediaStore.MediaColumns.SIZE
+                    )
+                val modifiedColumn =
+                    cursor.getColumnIndexOrThrow(
+                        MediaStore.MediaColumns
+                            .DATE_MODIFIED
+                    )
+
+                while (cursor.moveToNext()) {
+                    val name =
+                        cursor.getString(nameColumn)
+                            .orEmpty()
+                    if (
+                        !name.endsWith(
+                            ".zip",
+                            ignoreCase = true,
+                        )
+                    ) {
+                        continue
+                    }
+                    val id =
+                        cursor.getLong(idColumn)
+                    add(
+                        DiscoveredDownloadFile(
+                            name = name,
+                            uri =
+                                Uri.withAppendedPath(
+                                    MediaStore.Downloads
+                                        .EXTERNAL_CONTENT_URI,
+                                    id.toString(),
+                                ).toString(),
+                            sizeBytes =
+                                cursor.getLong(
+                                    sizeColumn
+                                ).takeIf {
+                                    it > 0L
+                                },
+                            modifiedAt =
+                                cursor.getLong(
+                                    modifiedColumn
+                                ).coerceAtLeast(
+                                    0L
+                                ) * 1000L,
+                        )
+                    )
+                }
+            }
+        }
+    } else {
+        val treeUri =
+            runCatching {
+                Uri.parse(treeUriString)
+            }.getOrNull()
+                ?: return emptyList()
+        val childrenUri =
+            runCatching {
+                DocumentsContract
+                    .buildChildDocumentsUriUsingTree(
+                        treeUri,
+                        DocumentsContract
+                            .getTreeDocumentId(
+                                treeUri
+                            ),
+                    )
+            }.getOrNull()
+                ?: return emptyList()
+
+        buildList {
+            context.contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document
+                        .COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document
+                        .COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document
+                        .COLUMN_SIZE,
+                    DocumentsContract.Document
+                        .COLUMN_LAST_MODIFIED,
+                ),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                val idColumn =
+                    cursor.getColumnIndexOrThrow(
+                        DocumentsContract.Document
+                            .COLUMN_DOCUMENT_ID
+                    )
+                val nameColumn =
+                    cursor.getColumnIndexOrThrow(
+                        DocumentsContract.Document
+                            .COLUMN_DISPLAY_NAME
+                    )
+                val sizeColumn =
+                    cursor.getColumnIndexOrThrow(
+                        DocumentsContract.Document
+                            .COLUMN_SIZE
+                    )
+                val modifiedColumn =
+                    cursor.getColumnIndexOrThrow(
+                        DocumentsContract.Document
+                            .COLUMN_LAST_MODIFIED
+                    )
+
+                while (cursor.moveToNext()) {
+                    val name =
+                        cursor.getString(
+                            nameColumn
+                        ).orEmpty()
+                    if (
+                        !name.endsWith(
+                            ".zip",
+                            ignoreCase = true,
+                        )
+                    ) {
+                        continue
+                    }
+
+                    val documentUri =
+                        DocumentsContract
+                            .buildDocumentUriUsingTree(
+                                treeUri,
+                                cursor.getString(
+                                    idColumn
+                                ),
+                            )
+                    add(
+                        DiscoveredDownloadFile(
+                            name = name,
+                            uri =
+                                documentUri
+                                    .toString(),
+                            sizeBytes =
+                                cursor.getLong(
+                                    sizeColumn
+                                ).takeIf {
+                                    it > 0L
+                                },
+                            modifiedAt =
+                                cursor.getLong(
+                                    modifiedColumn
+                                ).coerceAtLeast(
+                                    0L
+                                ),
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun discoveredFileState(
+    file: DiscoveredDownloadFile,
+): DownloadUiState {
+    val project =
+        knownProjects.firstOrNull {
+            val repo =
+                it.repo
+            repo.isNotBlank() &&
+                (
+                    file.name.equals(
+                        repo + ".zip",
+                        ignoreCase = true,
+                    ) ||
+                        file.name.startsWith(
+                            repo + "-",
+                            ignoreCase = true,
+                        )
+                    )
+        }
+
+    return DownloadUiState(
+        appName =
+            project?.name ?: file.name,
+        repo =
+            project?.repo.orEmpty(),
+        fileName = file.name,
+        fileUri = file.uri,
+        stage = "已下载",
+        downloadedBytes =
+            file.sizeBytes ?: 0L,
+        totalBytes =
+            file.sizeBytes,
+        running = false,
+        message = "已存在于下载目录",
+    )
+}
+
 private fun loadDownloadHistory(
     context: Context,
 ): List<DownloadHistoryEntry> {
-    val raw = context.getSharedPreferences(TOKEN_PREFS, Context.MODE_PRIVATE)
-        .getString(DOWNLOAD_HISTORY_JSON, null)
-        ?: return emptyList()
+    val raw =
+        context.getSharedPreferences(
+            TOKEN_PREFS,
+            Context.MODE_PRIVATE,
+        ).getString(
+            DOWNLOAD_HISTORY_JSON,
+            null,
+        )
 
-    return runCatching {
-        val array = JSONArray(raw)
-        buildList {
-            for (index in 0 until array.length()) {
-                val item = array.optJSONObject(index) ?: continue
-                val stateJson = item.optJSONObject("state") ?: continue
-                add(
-                    DownloadHistoryEntry(
-                        id = item.optLong("id", index.toLong()),
-                        completedAt = item.optLong("completedAt", 0L),
-                        state = downloadStateFromJson(stateJson),
+    val persisted =
+        if (raw.isNullOrBlank()) {
+            emptyList()
+        } else {
+            runCatching {
+                val array =
+                    JSONArray(raw)
+                buildList {
+                    for (
+                        index in
+                        0 until array.length()
+                    ) {
+                        val item =
+                            array.optJSONObject(
+                                index
+                            ) ?: continue
+                        val stateJson =
+                            item.optJSONObject(
+                                "state"
+                            ) ?: continue
+                        add(
+                            DownloadHistoryEntry(
+                                id =
+                                    item.optLong(
+                                        "id",
+                                        index.toLong(),
+                                    ),
+                                completedAt =
+                                    item.optLong(
+                                        "completedAt",
+                                        0L,
+                                    ),
+                                state =
+                                    downloadStateFromJson(
+                                        stateJson
+                                    ),
+                            )
+                        )
+                    }
+                }
+            }.getOrDefault(
+                emptyList()
+            )
+        }
+
+    val persistedByName =
+        persisted.associateBy {
+            downloadHistoryKey(
+                it.state
+            )
+        }.toMutableMap()
+
+    discoverDownloadedFiles(
+        context
+    ).forEach { file ->
+        val key =
+            file.name
+                .trim()
+                .lowercase()
+        val old =
+            persistedByName[key]
+        persistedByName[key] =
+            if (old != null) {
+                old.copy(
+                    completedAt =
+                        maxOf(
+                            old.completedAt,
+                            file.modifiedAt,
+                        ),
+                    state =
+                        old.state.copy(
+                            fileName =
+                                file.name,
+                            fileUri =
+                                file.uri,
+                            downloadedBytes =
+                                file.sizeBytes
+                                    ?: old.state
+                                        .downloadedBytes,
+                            totalBytes =
+                                file.sizeBytes
+                                    ?: old.state
+                                        .totalBytes,
+                        ),
+                )
+            } else {
+                val state =
+                    discoveredFileState(
+                        file
                     )
+                DownloadHistoryEntry(
+                    id =
+                        (
+                            file.modifiedAt xor
+                                file.name
+                                    .hashCode()
+                                    .toLong()
+                            ).let {
+                                if (it == Long.MIN_VALUE) {
+                                    0L
+                                } else {
+                                    kotlin.math.abs(it)
+                                }
+                            },
+                    completedAt =
+                        file.modifiedAt,
+                    state = state,
                 )
             }
-        }.sortedByDescending { it.completedAt }
-    }.getOrDefault(emptyList())
+    }
+
+    return persistedByName
+        .values
+        .distinctBy {
+            downloadHistoryKey(
+                it.state
+            )
+        }
+        .sortedByDescending {
+            it.completedAt
+        }
+        .take(
+            DOWNLOAD_HISTORY_LIMIT
+        )
 }
 
 private fun clearDownloadHistory(context: Context) {
