@@ -2687,14 +2687,29 @@ private fun downloadStateFromJson(json: JSONObject): DownloadUiState {
 }
 
 private fun downloadHistoryKey(state: DownloadUiState): String {
-    val fileName = state.apks
-        .takeIf { it.isNotEmpty() }
-        ?.let(::choosePrimaryApk)
-        ?.name
-        ?.trim()
-        ?.lowercase()
-        .orEmpty()
-    return fileName.ifBlank { state.appName.trim().lowercase() }
+    val downloadedFile =
+        state.fileName
+            .trim()
+            .lowercase()
+    if (downloadedFile.isNotBlank()) {
+        return downloadedFile
+    }
+
+    // Legacy entries from older builds did not persist the downloaded ZIP
+    // filename. Keep their old key only as a migration fallback.
+    val legacyFile =
+        state.apks
+            .takeIf { it.isNotEmpty() }
+            ?.let(::choosePrimaryApk)
+            ?.name
+            ?.trim()
+            ?.lowercase()
+            .orEmpty()
+    return legacyFile.ifBlank {
+        state.appName
+            .trim()
+            .lowercase()
+    }
 }
 
 private fun appendDownloadHistory(
@@ -6057,7 +6072,7 @@ private const val SORT_MODE = "sort_mode"
 private const val SORT_ASCENDING = "sort_ascending"
 private const val DOWNLOAD_STATE_JSON = "download_state_json"
 private const val DOWNLOAD_HISTORY_JSON = "download_history_json"
-private const val DOWNLOAD_HISTORY_LIMIT = 50
+private const val DOWNLOAD_HISTORY_LIMIT = 200
 private const val DOWNLOAD_SEGMENT_THREADS = 4
 private const val DOWNLOAD_RETRY_COUNT = 4
 private const val DOWNLOAD_MIN_SEGMENT_BYTES = 2L * 1024L * 1024L
