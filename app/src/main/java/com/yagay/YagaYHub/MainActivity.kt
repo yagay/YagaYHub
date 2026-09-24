@@ -1147,6 +1147,9 @@ private fun HubScreen(
     var showAboutDialog by remember { mutableStateOf(false) }
     var pendingInstallApk by remember { mutableStateOf<ExtractedApk?>(null) }
     var downloadUiState by remember { mutableStateOf(loadDownloadUiState(context)) }
+    var activeDownloads by remember {
+        mutableStateOf(loadActiveDownloadStates(context))
+    }
     var downloadHistory by remember { mutableStateOf(loadDownloadHistory(context)) }
     var showDownloadHistory by remember { mutableStateOf(false) }
     var selectedHistoryEntry by remember {
@@ -1241,8 +1244,15 @@ private fun HubScreen(
                 if (intent?.action != ACTION_DOWNLOAD_STATE) return
                 val state = downloadUiStateFromIntent(intent) ?: return
                 downloadUiState = state
+                activeDownloads =
+                    loadActiveDownloadStates(
+                        context
+                    )
                 if (!state.running) {
-                    downloadHistory = loadDownloadHistory(context)
+                    downloadHistory =
+                        loadDownloadHistory(
+                            context
+                        )
                     showDownloadPanel = true
                 }
             }
@@ -1565,7 +1575,14 @@ private fun HubScreen(
                 }
                 IconButton(
                     onClick = {
-                        downloadHistory = loadDownloadHistory(context)
+                        activeDownloads =
+                            loadActiveDownloadStates(
+                                context
+                            )
+                        downloadHistory =
+                            loadDownloadHistory(
+                                context
+                            )
                         showDownloadHistory = true
                     },
                     modifier = Modifier.size(36.dp),
@@ -2261,11 +2278,32 @@ private fun HubScreen(
     if (showDownloadHistory) {
         DownloadHistoryDialog(
             history = downloadHistory,
-            activeState = downloadUiState?.takeIf { it.running },
-            onDismiss = { showDownloadHistory = false },
-            onOpenActive = {
+            activeStates = activeDownloads,
+            onDismiss = {
+                showDownloadHistory = false
+            },
+            onOpenActive = { state ->
+                downloadUiState = state
                 showDownloadHistory = false
                 showDownloadPanel = true
+            },
+            onPauseResume = { state ->
+                controlArtifactDownload(
+                    context,
+                    state,
+                    if (state.paused) {
+                        ACTION_DOWNLOAD_RESUME
+                    } else {
+                        ACTION_DOWNLOAD_PAUSE
+                    },
+                )
+            },
+            onCancelActive = { state ->
+                controlArtifactDownload(
+                    context,
+                    state,
+                    ACTION_DOWNLOAD_CANCEL,
+                )
             },
             onOpenHistory = { entry ->
                 showDownloadHistory = false
@@ -2281,7 +2319,9 @@ private fun HubScreen(
     selectedHistoryEntry?.let { entry ->
         DownloadPanel(
             state = entry.state,
-            onDismiss = { selectedHistoryEntry = null },
+            onDismiss = {
+                selectedHistoryEntry = null
+            },
             onInstall = { apk ->
                 selectedHistoryEntry = null
                 if (
@@ -2305,6 +2345,30 @@ private fun HubScreen(
     if (showDownloadPanel && downloadUiState != null) {
         DownloadPanel(
             state = downloadUiState!!,
+            onPauseResume = {
+                val state =
+                    downloadUiState
+                        ?: return@DownloadPanel
+                controlArtifactDownload(
+                    context,
+                    state,
+                    if (state.paused) {
+                        ACTION_DOWNLOAD_RESUME
+                    } else {
+                        ACTION_DOWNLOAD_PAUSE
+                    },
+                )
+            },
+            onCancel = {
+                val state =
+                    downloadUiState
+                        ?: return@DownloadPanel
+                controlArtifactDownload(
+                    context,
+                    state,
+                    ACTION_DOWNLOAD_CANCEL,
+                )
+            },
             onDismiss = {
                 showDownloadPanel = false
                 if (downloadUiState?.running != true) {
