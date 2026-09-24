@@ -7782,12 +7782,13 @@ private fun openChatPopup(
         url?.takeIf {
             it.isNotBlank()
         }?.let {
+            // Opening an existing AI tab is navigation, not a rebind.
+            // EXTRA_CHAT_BIND_URL is reserved for an explicit binding
+            // confirmation. Sending it here made YBrowser treat a stale
+            // YagaYHub URL (often chatgpt.com/) as authoritative and replace
+            // the canonical /c/<id> learned by the live ChatGPT session.
             putExtra(
                 YBROWSER_EXTRA_URL,
-                it,
-            )
-            putExtra(
-                EXTRA_CHAT_BIND_URL,
                 it,
             )
         }
