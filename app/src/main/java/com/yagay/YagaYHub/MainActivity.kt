@@ -1799,14 +1799,37 @@ private fun HubScreen(
                     }
                     val onChatClick: () -> Unit = {
                         if (app.repo != null) {
-                            if (chatBindings.isEmpty()) {
-                                Toast.makeText(
-                                    context,
-                                    "当前项目还没有绑定页面，请点击“绑定”添加",
-                                    Toast.LENGTH_SHORT,
-                                ).show()
+                            val binding = chatBinding
+                            if (binding != null) {
+                                openChatPopup(
+                                    context = context,
+                                    url = binding.url,
+                                    bindingRepoKey =
+                                        binding.repoKey,
+                                    bindingProject =
+                                        app.name,
+                                    bindingTitle =
+                                        binding.title,
+                                )
                             } else {
+                                startChatGptBinding(
+                                    context = context,
+                                    app = app,
+                                    currentBinding = null,
+                                )
+                            }
+                        }
+                    }
+                    val onChatLongClick: () -> Unit = {
+                        if (app.repo != null) {
+                            if (chatBindings.isNotEmpty()) {
                                 bindingListApp = app
+                            } else {
+                                startChatGptBinding(
+                                    context = context,
+                                    app = app,
+                                    currentBinding = null,
+                                )
                             }
                         }
                     }
@@ -1832,6 +1855,8 @@ private fun HubScreen(
                             chatBinding = chatBinding,
                             chatBindingCount = chatBindings.size,
                             onChatClick = onChatClick,
+                            onChatLongClick =
+                                onChatLongClick,
                             onBindClick = onBindClick,
                         )
                     } else {
@@ -1846,6 +1871,8 @@ private fun HubScreen(
                             chatBinding = chatBinding,
                             chatBindingCount = chatBindings.size,
                             onChatClick = onChatClick,
+                            onChatLongClick =
+                                onChatLongClick,
                             onBindClick = onBindClick,
                         )
                     }
@@ -4332,6 +4359,7 @@ private fun AppListEntry(
     chatBinding: ChatBinding?,
     chatBindingCount: Int,
     onChatClick: () -> Unit,
+    onChatLongClick: () -> Unit,
     onBindClick: () -> Unit,
 ) {
     val hasNewerActions = hasNewerActionsBuild(app)
@@ -4561,12 +4589,10 @@ private fun AppListEntry(
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
                             .background(MaterialTheme.colorScheme.surface)
-                            .clickable(
-                                onClick = if (chatBindingCount > 0) {
-                                    onChatClick
-                                } else {
-                                    onBindClick
-                                },
+                            .combinedClickable(
+                                onClick = onChatClick,
+                                onLongClick =
+                                    onChatLongClick,
                             )
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -4625,6 +4651,7 @@ private fun AppEntry(
     chatBinding: ChatBinding?,
     chatBindingCount: Int,
     onChatClick: () -> Unit,
+    onChatLongClick: () -> Unit,
     onBindClick: () -> Unit,
 ) {
     val hasNewerActions = hasNewerActionsBuild(app)
@@ -4813,7 +4840,11 @@ private fun AppEntry(
                     "AI " + chatBindingCount,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onChatClick)
+                        .combinedClickable(
+                            onClick = onChatClick,
+                            onLongClick =
+                                onChatLongClick,
+                        )
                         .padding(horizontal = 5.dp, vertical = 3.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (chatBinding != null) {
