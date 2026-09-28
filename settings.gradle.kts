@@ -19,3 +19,5 @@ rootProject.name = "YagaYHub"
 include(":app", ":core", ":suite")
 include(":ydiag-feature")
 project(":ydiag-feature").projectDir = file("features/YDiag/feature")
+include(":ynotify-feature")
+project(":ynotify-feature").projectDir = file("features/YNotify/feature")
