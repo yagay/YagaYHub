@@ -15,4 +15,6 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "YagaYHub"
-include(":app")
+include(":app", ":core", ":suite")
+include(":ydiag-feature")
+project(":ydiag-feature").projectDir = file("features/YDiag/feature")
