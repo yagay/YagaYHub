@@ -57,6 +57,15 @@ object FeatureRegistry {
             requiresRoot = true,
             requiresHook = true,
         ),
+        FeatureSpec(
+            id = "yminiguard",
+            name = "YMiniGuard",
+            description = "小窗保活与后台播放守护",
+            entryActivityClassName = "com.yagay.YMiniGuard.MainActivity",
+            runtimeInitializerClassName = "com.yagay.YMiniGuard.GuardRuntime",
+            requiresRoot = true,
+            requiresHook = true,
+        ),
     )
 
     fun included(): List<FeatureSpec> = all.filter(FeatureSpec::isIncluded)
