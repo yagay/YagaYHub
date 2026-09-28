@@ -11,7 +11,9 @@ android {
         applicationId = "com.yagay.YSuite"
         minSdk = 31
         targetSdk = 37
-        versionCode = 1
+        // Keep the suite module generation aligned with ListCleaner's hook-compat generation.
+        // ListCleaner validates LSPosed's loaded module version before enabling live filtering.
+        versionCode = 43
         versionName = "0.1.0"
     }
 
