@@ -32,6 +32,14 @@ data class FeatureSpec(
 object FeatureRegistry {
     val all: List<FeatureSpec> = listOf(
         FeatureSpec(
+            id = "listcleaner",
+            name = "ListCleaner",
+            description = "分享、打开方式与组件列表清理",
+            entryActivityClassName = "com.yagay.ListCleaner.ui.MainActivity",
+            requiresRoot = true,
+            requiresHook = true,
+        ),
+        FeatureSpec(
             id = "ydiag",
             name = "YDiag",
             description = "应用日志与故障诊断",
