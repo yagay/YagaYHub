@@ -29,6 +29,7 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
         resources.merges += "META-INF/xposed/*"
+        jniLibs.pickFirsts += setOf("**/libbytehook.so")
     }
 }
 
@@ -36,6 +37,7 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":ydiag-feature"))
     implementation(project(":ynotify-feature"))
+    implementation(project(":ypower-feature"))
 
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
