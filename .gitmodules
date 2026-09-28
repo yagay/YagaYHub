@@ -17,3 +17,8 @@
 	path = features/YMiniGuard
 	url = https://github.com/yagay/YMiniGuard.git
 	branch = suite-integration
+
+[submodule "features/ListCleaner"]
+	path = features/ListCleaner
+	url = https://github.com/yagay/ListCleaner.git
+	branch = suite-integration
