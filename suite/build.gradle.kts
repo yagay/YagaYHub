@@ -35,6 +35,7 @@ android {
 dependencies {
     implementation(project(":core"))
     implementation(project(":ydiag-feature"))
+    implementation(project(":ynotify-feature"))
 
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
