@@ -1,0 +1,65 @@
+package com.yagay.suite.core
+
+import android.content.Context
+import android.content.Intent
+
+/**
+ * Deliberately small feature contract: one registry entry per embeddable app.
+ * Adding/removing a feature should only require changing this list and Gradle dependency.
+ */
+data class FeatureSpec(
+    val id: String,
+    val name: String,
+    val description: String,
+    val entryActivityClassName: String,
+    val runtimeInitializerClassName: String? = null,
+    val requiresRoot: Boolean = false,
+    val requiresHook: Boolean = false,
+    val defaultEnabled: Boolean = true,
+) {
+    fun isIncluded(): Boolean = runCatching { Class.forName(entryActivityClassName) }.isSuccess
+
+    fun createIntent(context: Context): Intent =
+        Intent(context, Class.forName(entryActivityClassName))
+
+    fun initialize(context: Context) {
+        val className = runtimeInitializerClassName ?: return
+        val runtimeClass = Class.forName(className)
+        runtimeClass.getMethod("get", Context::class.java).invoke(null, context.applicationContext)
+    }
+}
+
+object FeatureRegistry {
+    val all: List<FeatureSpec> = listOf(
+        FeatureSpec(
+            id = "ydiag",
+            name = "YDiag",
+            description = "应用日志与故障诊断",
+            entryActivityClassName = "com.yagay.ydiag.ui.MainActivity",
+            runtimeInitializerClassName = "com.yagay.ydiag.YDiagRuntime",
+            requiresRoot = true,
+            requiresHook = true,
+        ),
+    )
+
+    fun included(): List<FeatureSpec> = all.filter(FeatureSpec::isIncluded)
+}
+
+class FeatureStateStore(context: Context) {
+    private val prefs = context.applicationContext
+        .getSharedPreferences("ysuite_features", Context.MODE_PRIVATE)
+
+    fun isEnabled(feature: FeatureSpec): Boolean =
+        prefs.getBoolean("enabled.${feature.id}", feature.defaultEnabled)
+
+    fun setEnabled(feature: FeatureSpec, enabled: Boolean) {
+        prefs.edit().putBoolean("enabled.${feature.id}", enabled).apply()
+    }
+
+    fun isVisible(feature: FeatureSpec): Boolean =
+        prefs.getBoolean("visible.${feature.id}", true)
+
+    fun setVisible(feature: FeatureSpec, visible: Boolean) {
+        prefs.edit().putBoolean("visible.${feature.id}", visible).apply()
+    }
+}
