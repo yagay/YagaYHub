@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -52,6 +53,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun FeatureManagerScreen() {
         val features = remember { FeatureRegistry.included() }
@@ -124,7 +126,11 @@ class MainActivity : ComponentActivity() {
                                         ).show()
                                     }
                             } else {
-                                SuiteLog.i(this@MainActivity, feature.id, "disabled; restart target process if hook was already loaded")
+                                SuiteLog.i(
+                                    this@MainActivity,
+                                    feature.id,
+                                    "disabled; restart target process if hook was already loaded",
+                                )
                             }
                         },
                         onOpen = {
@@ -172,7 +178,10 @@ private fun FeatureCard(
                         if (feature.requiresHook) add("LSPosed")
                     }
                     if (needs.isNotEmpty()) {
-                        Text("需要：${needs.joinToString(" + ")}", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "需要：${needs.joinToString(" + ")}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
                 Switch(checked = isEnabled, onCheckedChange = onEnabledChange)
