@@ -38,6 +38,7 @@ dependencies {
     implementation(project(":ydiag-feature"))
     implementation(project(":ynotify-feature"))
     implementation(project(":ypower-feature"))
+    implementation(project(":yminiguard-feature"))
 
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
