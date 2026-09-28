@@ -2,3 +2,8 @@
 	path = features/YDiag
 	url = https://github.com/yagay/YDiag.git
 	branch = suite-integration
+
+[submodule "features/YNotify"]
+	path = features/YNotify
+	url = https://github.com/yagay/YNotify.git
+	branch = suite-integration
