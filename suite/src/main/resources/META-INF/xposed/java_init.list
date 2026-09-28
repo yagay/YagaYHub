@@ -3,3 +3,4 @@ com.yagay.YNotify.xposed.YNotifyModule
 com.yagay.ypower.hook.YPowerModule
 com.yagay.ypower.hook.SupplementalSecurityModule
 com.yagay.ypower.hook.DeepObservationModule
+com.yagay.YMiniGuard.GuardModule
