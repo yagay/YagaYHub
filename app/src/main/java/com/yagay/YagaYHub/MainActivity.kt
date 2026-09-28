@@ -1309,9 +1309,11 @@ private fun HubScreen(
         try {
             val loadedApps = loadHubApps(context)
             val mergedApps = withContext(Dispatchers.IO) {
+                val repositories = fetchOwnedRepositories(githubToken)
                 mergeGithubRepositories(
                     apps = loadedApps,
-                    repositories = fetchOwnedRepositories(githubToken),
+                    repositories = repositories,
+                    pruneMissingKnownProjects = githubToken.isNotBlank(),
                 )
             }
             apps = mergedApps
@@ -5046,6 +5048,7 @@ private fun mergeGithubRepositories(
     apps: List<HubApp>,
     repositories: List<GithubRepository>,
     resetActionsStatus: Boolean = true,
+    pruneMissingKnownProjects: Boolean = false,
 ): List<HubApp> {
     val result = apps.toMutableList()
     val existingRepos = apps.mapNotNull { app ->
@@ -5115,6 +5118,21 @@ private fun mergeGithubRepositories(
         existingRepos += key
     }
 
+    if (pruneMissingKnownProjects) {
+        val currentRepoKeys = repositories
+            .mapTo(mutableSetOf()) { repository ->
+                (repository.owner + "/" + repository.name).lowercase()
+            }
+
+        result.removeAll { app ->
+            val repo = app.repo
+            !app.installed &&
+                !app.repoOnly &&
+                repo != null &&
+                (app.repoOwner + "/" + repo).lowercase() !in currentRepoKeys
+        }
+    }
+
     return result.sortedWith(
         compareByDescending<HubApp> { it.installed }
             .thenBy { it.repoOnly }
@@ -5137,6 +5155,7 @@ private suspend fun refreshDynamicGithubState(
         apps = apps,
         repositories = repositories,
         resetActionsStatus = false,
+        pruneMissingKnownProjects = token.isNotBlank(),
     )
 
     fun repoKey(app: HubApp): String? {
