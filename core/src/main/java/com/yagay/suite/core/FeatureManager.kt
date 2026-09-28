@@ -40,6 +40,14 @@ object FeatureRegistry {
             requiresRoot = true,
             requiresHook = true,
         ),
+        FeatureSpec(
+            id = "ynotify",
+            name = "YNotify",
+            description = "通知 / Toast / 横幅历史",
+            entryActivityClassName = "com.yagay.YNotify.ui.MainActivity",
+            runtimeInitializerClassName = "com.yagay.YNotify.YNotifyRuntime",
+            requiresHook = true,
+        ),
     )
 
     fun included(): List<FeatureSpec> = all.filter(FeatureSpec::isIncluded)
