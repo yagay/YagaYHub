@@ -7,3 +7,8 @@
 	path = features/YNotify
 	url = https://github.com/yagay/YNotify.git
 	branch = suite-integration
+
+[submodule "features/YPower"]
+	path = features/YPower
+	url = https://github.com/yagay/YPower.git
+	branch = suite-integration
