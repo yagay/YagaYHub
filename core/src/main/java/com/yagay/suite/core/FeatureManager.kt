@@ -48,6 +48,15 @@ object FeatureRegistry {
             runtimeInitializerClassName = "com.yagay.YNotify.YNotifyRuntime",
             requiresHook = true,
         ),
+        FeatureSpec(
+            id = "ypower",
+            name = "YPower",
+            description = "应用增强、检测与运行时诊断",
+            entryActivityClassName = "com.yagay.ypower.ui.MainActivity",
+            runtimeInitializerClassName = "com.yagay.ypower.YPowerRuntime",
+            requiresRoot = true,
+            requiresHook = true,
+        ),
     )
 
     fun included(): List<FeatureSpec> = all.filter(FeatureSpec::isIncluded)
