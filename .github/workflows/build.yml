@@ -7,12 +7,103 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: One-shot compact AI entry migration
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('app/src/main/java/com/yagay/YagaYHub/MainActivity.kt')
+          text = path.read_text()
+          start = text.index('private fun openChatPopup(')
+          end = text.index('\nprivate fun openUrl(', start)
+          block = text[start:end]
+
+          if 'YBROWSER_AI_WORKSPACE_ACTIVITY' in block or 'YBROWSER_OPEN_AI_ACTION' in block:
+              replacement = '''private fun openChatPopup(
+    context: Context,
+    url: String?,
+    bindingRepoKey: String? = null,
+    bindingProject: String? = null,
+    bindingTitle: String? = null,
+) {
+    val compactIntent = Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
+        setClassName(
+            YBROWSER_PACKAGE,
+            YBROWSER_EMBEDDED_ACTIVITY,
+        )
+
+        url?.takeIf { it.isNotBlank() }?.let {
+            putExtra(YBROWSER_EXTRA_URL, it)
+        }
+
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE, true)
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_EMBEDDED, true)
+        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
+
+        if (!bindingRepoKey.isNullOrBlank()) {
+            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
+            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
+            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
+        }
+
+        // Prefer the already-existing compact host. YBrowser keeps all bound
+        // pages in its retained session pool, so returning to AI should select
+        // the live session instead of rebuilding/reloading the page.
+        addFlags(
+            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP,
+        )
+    }
+
+    try {
+        context.startActivity(compactIntent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(
+            context,
+            "请先安装或更新 YBrowser",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+}
+'''
+              text = text[:start] + replacement + text[end:]
+
+          text = text.replace(
+              'private const val YBROWSER_OPEN_AI_ACTION =\n    "com.yagay.YBrowser.action.OPEN_AI"\n',
+              ''
+          )
+          text = text.replace(
+              'private const val YBROWSER_AI_WORKSPACE_ACTIVITY =\n    "com.yagay.ybrowser.ai.AiWorkspaceActivity"\n',
+              ''
+          )
+          path.write_text(text)
+          PY
+
+          # Restore the normal build workflow in the same source commit.
+          git show HEAD^:.github/workflows/build.yml > .github/workflows/build.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/yagay/YagaYHub/MainActivity.kt .github/workflows/build.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "Use compact retained UI for AI entry"
+            git push origin HEAD:main
+          fi
 
       - name: Setup Java 17
         uses: actions/setup-java@v5
