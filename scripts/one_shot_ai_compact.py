@@ -1,3 +1,4 @@
+# one-shot migration trigger
 from pathlib import Path
 
 path = Path("app/src/main/java/com/yagay/YagaYHub/MainActivity.kt")
