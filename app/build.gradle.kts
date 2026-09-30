@@ -3,6 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val ciArm64Only = providers.gradleProperty("ciArm64Only").orNull == "true"
+
 android {
     namespace = "com.yagay.YagaYHub"
     compileSdk = 37
@@ -13,6 +15,13 @@ android {
         targetSdk = 37
         versionCode = 22
         versionName = "1.8.0"
+
+        if (ciArm64Only) {
+            ndk {
+                abiFilters.clear()
+                abiFilters += "arm64-v8a"
+            }
+        }
 
         val githubClientId = providers
             .environmentVariable("YAGAY_GITHUB_CLIENT_ID")
