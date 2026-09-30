@@ -7858,51 +7858,30 @@ private fun openChatPopup(
     bindingProject: String? = null,
     bindingTitle: String? = null,
 ) {
-    val aiIntent = Intent(YBROWSER_OPEN_AI_ACTION).apply {
+    val compactIntent = Intent(YBROWSER_OPEN_BROWSER_ACTION).apply {
         setClassName(
             YBROWSER_PACKAGE,
-            YBROWSER_AI_WORKSPACE_ACTIVITY,
+            YBROWSER_EMBEDDED_ACTIVITY,
         )
 
-        url?.takeIf {
-            it.isNotBlank()
-        }?.let {
-            // Opening an existing AI tab is navigation, not a rebind.
-            // EXTRA_CHAT_BIND_URL is reserved for an explicit binding
-            // confirmation. Sending it here made YBrowser treat a stale
-            // YagaYHub URL (often chatgpt.com/) as authoritative and replace
-            // the canonical /c/<id> learned by the live ChatGPT session.
-            putExtra(
-                YBROWSER_EXTRA_URL,
-                it,
-            )
+        url?.takeIf { it.isNotBlank() }?.let {
+            putExtra(YBROWSER_EXTRA_URL, it)
         }
 
-        putExtra(
-            EXTRA_CHAT_TARGETS_JSON,
-            chatTargetsJson(context),
-        )
-
-        putExtra(
-            YBROWSER_EXTRA_YAGAYHUB_EMBEDDED,
-            true,
-        )
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_BINDING_MODE, true)
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_COMPACT_MODE, true)
+        putExtra(YBROWSER_EXTRA_YAGAYHUB_EMBEDDED, true)
+        putExtra(EXTRA_CHAT_TARGETS_JSON, chatTargetsJson(context))
 
         if (!bindingRepoKey.isNullOrBlank()) {
-            putExtra(
-                EXTRA_CHAT_BIND_REPO,
-                bindingRepoKey,
-            )
-            putExtra(
-                EXTRA_CHAT_BIND_PROJECT,
-                bindingProject.orEmpty(),
-            )
-            putExtra(
-                EXTRA_CHAT_BIND_TITLE,
-                bindingTitle.orEmpty(),
-            )
+            putExtra(EXTRA_CHAT_BIND_REPO, bindingRepoKey)
+            putExtra(EXTRA_CHAT_BIND_PROJECT, bindingProject.orEmpty())
+            putExtra(EXTRA_CHAT_BIND_TITLE, bindingTitle.orEmpty())
         }
 
+        // Prefer an already-existing compact host. Bound pages live in
+        // YBrowser's retained session pool, so returning to AI should reuse
+        // the live tab/session instead of rebuilding or reloading the page.
         addFlags(
             Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
                 Intent.FLAG_ACTIVITY_SINGLE_TOP,
@@ -7910,7 +7889,7 @@ private fun openChatPopup(
     }
 
     try {
-        context.startActivity(aiIntent)
+        context.startActivity(compactIntent)
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(
             context,
@@ -7950,10 +7929,6 @@ private const val EXTRA_AI_WINDOW_ID =
 private const val CHATGPT_NEW_CHAT_URL =
     "https://chatgpt.com/"
 private const val YBROWSER_PACKAGE = "com.yagay.YBrowser"
-private const val YBROWSER_OPEN_AI_ACTION =
-    "com.yagay.YBrowser.action.OPEN_AI"
-private const val YBROWSER_AI_WORKSPACE_ACTIVITY =
-    "com.yagay.ybrowser.ai.AiWorkspaceActivity"
 private const val YBROWSER_EMBEDDED_ACTIVITY =
     "com.yagay.YBrowser.YagaYHubEmbeddedActivity"
 private const val YBROWSER_EXTRA_URL = "com.yagay.YBrowser.extra.URL"
