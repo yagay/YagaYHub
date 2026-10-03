@@ -5311,20 +5311,104 @@ private fun fetchLatestActionsInfo(
     knownArtifactId: Long? = null,
     knownArtifactSizeBytes: Long? = null,
 ): LatestActionsInfo {
-    var connection: HttpURLConnection? = null
+    val baseUrl = "https://api.github.com/repos/" + owner + "/" + repo
+
+    fun getJson(url: String): JSONObject? {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = githubGet(url, token = token)
+            if (connection.responseCode !in 200..299) {
+                null
+            } else {
+                val body = connection.inputStream
+                    .bufferedReader()
+                    .use { it.readText() }
+                JSONObject(body)
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
     return try {
-        connection = githubGet(
-            "https://api.github.com/repos/" + owner + "/" + repo + "/actions/runs?per_page=1",
-            token = token,
-        )
-        if (connection.responseCode !in 200..299) {
-            return LatestActionsInfo(ActionsStatus.UNKNOWN, null, null, null, null)
+        // First identify which workflow is the Debug workflow.  Artifact names are
+        // the most reliable signal because many repositories use generic workflow
+        // names such as "Build APK" while still producing assembleDebug output.
+        var debugWorkflowId: Long? = null
+        val artifacts = getJson(
+            baseUrl + "/actions/artifacts?per_page=100"
+        )?.optJSONArray("artifacts")
+
+        if (artifacts != null) {
+            for (index in 0 until artifacts.length()) {
+                val artifact = artifacts.optJSONObject(index) ?: continue
+                if (artifact.optBoolean("expired", false)) continue
+                if (!artifact.optString("name").contains("debug", ignoreCase = true)) {
+                    continue
+                }
+
+                val anchorRunId = artifact
+                    .optJSONObject("workflow_run")
+                    ?.optLong("id")
+                    ?.takeIf { it > 0L }
+                    ?: continue
+                val anchorRun = getJson(baseUrl + "/actions/runs/" + anchorRunId)
+                val workflowId = anchorRun
+                    ?.optLong("workflow_id")
+                    ?.takeIf { it > 0L }
+                if (workflowId != null) {
+                    debugWorkflowId = workflowId
+                    break
+                }
+            }
         }
 
-        val body = connection.inputStream.bufferedReader().use { it.readText() }
-        val runs = JSONObject(body).optJSONArray("workflow_runs")
+        // New repositories may not have a Debug artifact yet.  In that case use an
+        // explicit Debug workflow name/path as a safe fallback.
+        if (debugWorkflowId == null) {
+            val recentRuns = getJson(
+                baseUrl + "/actions/runs?per_page=30"
+            )?.optJSONArray("workflow_runs")
+            if (recentRuns != null) {
+                for (index in 0 until recentRuns.length()) {
+                    val run = recentRuns.optJSONObject(index) ?: continue
+                    val marker = run.optString("name") + " " + run.optString("path")
+                    if (!marker.contains("debug", ignoreCase = true)) continue
+                    val workflowId = run
+                        .optLong("workflow_id")
+                        .takeIf { it > 0L }
+                    if (workflowId != null) {
+                        debugWorkflowId = workflowId
+                        break
+                    }
+                }
+            }
+        }
+
+        val workflowId = debugWorkflowId
+            ?: return LatestActionsInfo(
+                ActionsStatus.NONE,
+                null,
+                null,
+                null,
+                null,
+            )
+
+        // From here on, status/time/run-id always come from the latest run of the
+        // identified Debug workflow, never from an unrelated Release or utility run.
+        val runs = getJson(
+            baseUrl + "/actions/workflows/" + workflowId + "/runs?per_page=1"
+        )?.optJSONArray("workflow_runs")
         if (runs == null || runs.length() == 0) {
-            return LatestActionsInfo(ActionsStatus.NONE, null, null, null, null)
+            return LatestActionsInfo(
+                ActionsStatus.NONE,
+                null,
+                null,
+                null,
+                null,
+            )
         }
 
         val run = runs.getJSONObject(0)
@@ -5332,12 +5416,16 @@ private fun fetchLatestActionsInfo(
         val runId = run.optLong("id").takeIf { it > 0L }
         val actionTime = formatActionsTime(
             run.optString("run_started_at").ifBlank {
-                run.optString("created_at").ifBlank { run.optString("updated_at") }
+                run.optString("created_at").ifBlank {
+                    run.optString("updated_at")
+                }
             }
         )
 
-        // 同一个成功 run 已有 artifact 时直接复用，避免自动刷新重复请求产物接口。
-        val artifactInfo = if (status == ActionsStatus.SUCCESS && runId != null) {
+        // ZIP/artifact is also resolved only from that same Debug run.
+        val artifactInfo = if (
+            status == ActionsStatus.SUCCESS && runId != null
+        ) {
             if (runId == knownRunId && knownArtifactId != null) {
                 knownArtifactId to (knownArtifactSizeBytes ?: 0L)
             } else {
@@ -5355,11 +5443,16 @@ private fun fetchLatestActionsInfo(
             artifactSizeBytes = artifactInfo?.second,
         )
     } catch (_: Exception) {
-        LatestActionsInfo(ActionsStatus.UNKNOWN, null, null, null, null)
-    } finally {
-        connection?.disconnect()
+        LatestActionsInfo(
+            ActionsStatus.UNKNOWN,
+            null,
+            null,
+            null,
+            null,
+        )
     }
 }
+
 
 private fun fetchLatestArtifactInfo(
     owner: String,
