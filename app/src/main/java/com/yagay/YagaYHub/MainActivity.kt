@@ -7839,16 +7839,26 @@ private fun startChatGptBinding(
 }
 
 private fun sendVerifiedBindingBroadcast(context: Context, intent: Intent) {
-    // Android 14+ can attach an OS-provided sender identity. YBrowser verifies
-    // the UID/package before mutating project bindings; extras alone cannot
-    // authenticate a cross-application request.
+    // ContentProvider.call carries Android's verified Binder caller UID,
+    // including on Android 12 and 13 where broadcasts lack sender identity.
+    val method = when (intent.action) {
+        YBROWSER_CHAT_BINDING_REMOVE_ACTION -> "remove"
+        YBROWSER_CHAT_BINDING_SYNC_ACTION -> "sync"
+        else -> return
+    }
+    val provider = Uri.parse("content://com.yagay.YBrowser.yagayhub.bindings")
+    val saved = runCatching {
+        context.contentResolver.call(provider, method, null, intent.extras)
+            ?.getBoolean("success") == true
+    }.getOrDefault(false)
+    if (saved) return
+
+    // Backward-compatible only when Android can verify the broadcast sender.
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
         val options = android.app.BroadcastOptions.makeBasic()
             .setShareIdentityEnabled(true)
             .toBundle()
         context.sendBroadcast(intent, null, options)
-    } else {
-        context.sendBroadcast(intent)
     }
 }
 
