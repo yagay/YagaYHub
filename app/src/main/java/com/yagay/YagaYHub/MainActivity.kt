@@ -7838,6 +7838,20 @@ private fun startChatGptBinding(
     }
 }
 
+private fun sendVerifiedBindingBroadcast(context: Context, intent: Intent) {
+    // Android 14+ can attach an OS-provided sender identity. YBrowser verifies
+    // the UID/package before mutating project bindings; extras alone cannot
+    // authenticate a cross-application request.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        val options = android.app.BroadcastOptions.makeBasic()
+            .setShareIdentityEnabled(true)
+            .toBundle()
+        context.sendBroadcast(intent, null, options)
+    } else {
+        context.sendBroadcast(intent)
+    }
+}
+
 private fun removeChatBindingFromYBrowser(
     context: Context,
     url: String,
@@ -7846,7 +7860,7 @@ private fun removeChatBindingFromYBrowser(
         setPackage(YBROWSER_PACKAGE)
         putExtra(EXTRA_CHAT_BIND_URL, url)
     }
-    runCatching { context.sendBroadcast(intent) }
+    runCatching { sendVerifiedBindingBroadcast(context, intent) }
 }
 
 private fun syncChatBindingToYBrowser(
@@ -7863,7 +7877,7 @@ private fun syncChatBindingToYBrowser(
         putExtra(EXTRA_CHAT_BIND_URL, url)
         putExtra(EXTRA_CHAT_BIND_TITLE, title)
     }
-    runCatching { context.sendBroadcast(intent) }
+    runCatching { sendVerifiedBindingBroadcast(context, intent) }
 }
 
 private fun returnChatBindingToRequester(
